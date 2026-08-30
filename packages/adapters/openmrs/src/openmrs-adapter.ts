@@ -175,6 +175,7 @@ class OpenmrsAdapter implements EmrAdapter {
   }
 
   async listAbnormalResults(input: ResultQuery): Promise<ResultSummary[]> {
+    rejectUnsupportedCursor(input.cursor);
     const cap = Math.max(0, Math.min(input.limit, ABNORMAL_LIMIT));
     const patientIds = await this.resolvePatientIds(input.patientId);
     const matches: ResultSummary[] = [];
@@ -205,6 +206,7 @@ class OpenmrsAdapter implements EmrAdapter {
   }
 
   async listFollowups(input: FollowupQuery): Promise<FollowupSummary[]> {
+    rejectUnsupportedCursor(input.cursor);
     const cap = Math.max(0, input.limit);
     const patientIds = await this.resolvePatientIds(input.patientId);
     const nowMs = this.now().getTime();
@@ -352,6 +354,12 @@ function assertValidTarget(target: EmrNavigationTarget): void {
 
 function present<T>(values: Array<T | undefined>): T[] {
   return values.filter((value): value is T => value !== undefined);
+}
+
+function rejectUnsupportedCursor(cursor: string | undefined): void {
+  if (typeof cursor === 'string' && cursor !== '') {
+    throw invalidInput('Cursor pagination is not supported.');
+  }
 }
 
 function invalidInput(message: string): AdapterError {

@@ -93,6 +93,7 @@ function runWebmcpLifecycle(): () => void {
     const next = await createDefaultCapabilityProbe({
       fetch,
       isAuthenticated: () => authenticated,
+      getPatientId: () => patientId,
     })();
     if (generation !== probeGeneration) {
       return;

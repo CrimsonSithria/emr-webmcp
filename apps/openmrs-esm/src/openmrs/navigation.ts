@@ -12,7 +12,7 @@ export function toSafeSpaPath(target: EmrNavigationTarget): string {
     case 'review-queue':
       return assertSafePath('/emr-webmcp');
     case 'patient-chart':
-      return assertSafePath(`/patient/${encodeSegment(target.patientId)}`);
+      return assertSafePath(`/patient/${encodeSegment(target.patientId)}/chart`);
     case 'tests-dashboard':
       if (target.patientId === undefined) {
         return assertSafePath('/home');

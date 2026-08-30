@@ -1,102 +1,15 @@
 import {
   AdapterError,
-  RegistrationManager,
   type EmrAdapter,
-  type EmrCapability,
   type FollowupDraft,
   type ToolName,
   type ToolRuntime,
 } from '@emr-webmcp/core';
-import { useLayoutEffect, useRef } from 'react';
-
-import { getDocumentModelContext } from './document-model-context';
 
 export type SessionSnapshot = {
   authenticated: boolean;
   userId: string | null;
 };
-
-export type UseWebmcpRegistrationInput = {
-  session: SessionSnapshot;
-  privileges: ReadonlySet<string>;
-  capabilities: ReadonlySet<EmrCapability>;
-  routeContext: string;
-  adapter: EmrAdapter;
-};
-
-export function useWebmcpRegistration(input: UseWebmcpRegistrationInput): void {
-  const inputRef = useRef(input);
-  inputRef.current = input;
-  const draftsRef = useRef(new Map<string, FollowupDraft>());
-  const previousUserId = useRef<string | null>(null);
-  const managerRef = useRef<RegistrationManager | null>(null);
-  const runtimeRef = useRef<ToolRuntime | null>(null);
-
-  if (runtimeRef.current === null) {
-    runtimeRef.current = createSessionCheckedRuntime({
-      getAdapter: () => inputRef.current.adapter,
-      getSession: () => inputRef.current.session,
-      getPrivileges: () => inputRef.current.privileges,
-      drafts: draftsRef.current,
-    });
-  }
-
-  const authenticated = input.session.authenticated;
-  const userId = input.session.userId;
-  const privileges = input.privileges;
-  const capabilities = input.capabilities;
-  const routeContext = input.routeContext;
-
-  useLayoutEffect(() => {
-    const drafts = draftsRef.current;
-    const model = getDocumentModelContext();
-    if (model === null) {
-      return undefined;
-    }
-    const manager = new RegistrationManager({
-      modelContext: model,
-      runtime: runtimeRef.current as ToolRuntime,
-      deps: {
-        randomUUID: () => crypto.randomUUID(),
-        now: () => new Date(),
-        adapterId: inputRef.current.adapter.id,
-      },
-    });
-    managerRef.current = manager;
-    return () => {
-      manager.unmount();
-      managerRef.current = null;
-      drafts.clear();
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    const manager = managerRef.current;
-    if (manager === null) {
-      return;
-    }
-
-    if (!authenticated || userId === null) {
-      manager.logout();
-      draftsRef.current.clear();
-      previousUserId.current = null;
-      return;
-    }
-
-    if (previousUserId.current !== null && previousUserId.current !== userId) {
-      manager.userChange();
-      draftsRef.current.clear();
-    }
-
-    manager.update({
-      userId,
-      privileges,
-      capabilities,
-      routeContext,
-    });
-    previousUserId.current = userId;
-  }, [authenticated, userId, privileges, capabilities, routeContext]);
-}
 
 export function createSessionCheckedRuntime(ports: {
   getAdapter: () => EmrAdapter;

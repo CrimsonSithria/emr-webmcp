@@ -1,4 +1,5 @@
 import {
+  RegistrationManager,
   TOOL_NAMES,
   type EmrAdapter,
   type EmrCapability,
@@ -12,7 +13,7 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import EmrWebmcp from '../emr-webmcp.component';
-import { useWebmcpRegistration, type SessionSnapshot } from './use-webmcp-registration';
+import { createSessionCheckedRuntime, type SessionSnapshot } from './use-webmcp-registration';
 
 const ALL_CAPABILITIES: readonly EmrCapability[] = [
   'search-patients',
@@ -123,43 +124,61 @@ function stubAdapter(overrides: Partial<EmrAdapter> = {}): EmrAdapter {
   };
 }
 
-function Harness(props: {
+function startManager(options?: {
+  session?: SessionSnapshot;
+  privileges?: ReadonlySet<string>;
+  adapter?: EmrAdapter;
+}): {
+  model: FakeModelContext;
   session: SessionSnapshot;
   privileges: ReadonlySet<string>;
-  capabilities: ReadonlySet<EmrCapability>;
-  routeContext: string;
-  adapter: EmrAdapter;
-}) {
-  useWebmcpRegistration(props);
-  return <div data-testid="webmcp-harness" />;
-}
-
-function renderHarness(
-  model: FakeModelContext,
-  options?: {
-    session?: SessionSnapshot;
-    privileges?: ReadonlySet<string>;
-    capabilities?: Iterable<EmrCapability>;
-    routeContext?: string;
-    adapter?: EmrAdapter;
-  },
-) {
-  const props = {
+  drafts: Map<string, FollowupDraft>;
+  manager: RegistrationManager;
+  apply: (next?: { session?: SessionSnapshot; privileges?: ReadonlySet<string> }) => void;
+} {
+  const model = installFakeModelContext();
+  const state = {
     session: options?.session ?? { authenticated: true, userId: 'user-1' },
     privileges: options?.privileges ?? BOTH_PRIVILEGES,
-    capabilities: new Set(options?.capabilities ?? ALL_CAPABILITIES),
-    routeContext: options?.routeContext ?? '/home',
-    adapter: options?.adapter ?? stubAdapter(),
   };
-  const view = render(<Harness {...props} />);
-  expect(model).toBeDefined();
-  return {
-    ...view,
-    props,
-    rerenderWith(next: Partial<typeof props>) {
-      view.rerender(<Harness {...props} {...next} />);
+  const drafts = new Map<string, FollowupDraft>();
+  const adapter = options?.adapter ?? stubAdapter();
+  const runtime = createSessionCheckedRuntime({
+    getAdapter: () => adapter,
+    getSession: () => state.session,
+    getPrivileges: () => state.privileges,
+    drafts,
+  });
+  const manager = new RegistrationManager({
+    modelContext: model,
+    runtime,
+    deps: {
+      randomUUID: () => crypto.randomUUID(),
+      now: () => new Date(),
+      adapterId: adapter.id,
     },
+  });
+  const apply = (next?: { session?: SessionSnapshot; privileges?: ReadonlySet<string> }): void => {
+    if (next?.session !== undefined) {
+      state.session = next.session;
+    }
+    if (next?.privileges !== undefined) {
+      state.privileges = next.privileges;
+    }
+    if (!state.session.authenticated || state.session.userId === null) {
+      manager.logout();
+      drafts.clear();
+      return;
+    }
+    manager.update({
+      userId: state.session.userId,
+      privileges: state.privileges,
+      capabilities: new Set(ALL_CAPABILITIES),
+      routeContext: '/home',
+    });
   };
+  apply();
+  return { model, session: state.session, privileges: state.privileges, drafts, manager, apply };
 }
 
 async function invoke(tool: RegisteredTool, input: unknown): Promise<ToolResult<unknown>> {
@@ -170,98 +189,18 @@ afterEach(() => {
   clearModelContext();
 });
 
-describe('useWebmcpRegistration', () => {
-  it('does not crash when document.modelContext is absent', () => {
-    expect(() =>
-      render(
-        <Harness
-          session={{ authenticated: true, userId: 'user-1' }}
-          privileges={BOTH_PRIVILEGES}
-          capabilities={new Set(ALL_CAPABILITIES)}
-          routeContext="/home"
-          adapter={stubAdapter()}
-        />,
-      ),
-    ).not.toThrow();
-    expect(screen.getByTestId('webmcp-harness')).toBeInTheDocument();
-  });
-
-  it('registers twelve eligible tools when privileges and capabilities are complete', () => {
-    const model = installFakeModelContext();
-    renderHarness(model);
-
-    expect(model.names()).toEqual([...TOOL_NAMES]);
-    expect(model.tools).toHaveLength(12);
-    expect(model.tools.every((tool) => typeof tool.execute === 'function')).toBe(true);
-  });
-
-  it('omits unsupported tools when a required capability is missing', () => {
-    const model = installFakeModelContext();
-    renderHarness(model, { capabilities: ['search-patients'] });
-
-    expect(model.names()).toEqual(['get_active_patient', 'search_patients']);
-  });
-
-  it('aborts prior registrations on logout', () => {
-    const model = installFakeModelContext();
-    const view = renderHarness(model);
-    expect(model.names()).toHaveLength(12);
-
-    view.rerenderWith({
-      session: { authenticated: false, userId: null },
-      privileges: EMPTY,
-    });
-
-    expect(model.names()).toEqual([]);
-    expect(model.unregisterLog).toHaveLength(12);
-  });
-
-  it('aborts prior registrations on user change', () => {
-    const model = installFakeModelContext();
-    const view = renderHarness(model);
-    const firstGeneration = [...model.tools];
-
-    view.rerenderWith({ session: { authenticated: true, userId: 'user-2' } });
-
-    expect(model.unregisterLog).toHaveLength(12);
-    expect(model.names()).toEqual([...TOOL_NAMES]);
-    expect(model.tools.some((tool) => firstGeneration.includes(tool))).toBe(false);
-  });
-
+describe('createSessionCheckedRuntime', () => {
   it('replaces registrations when privileges change', () => {
-    const model = installFakeModelContext();
-    const view = renderHarness(model);
+    const { model, apply } = startManager();
+    expect(model.names()).toEqual([...TOOL_NAMES]);
 
-    view.rerenderWith({ privileges: SESSION_ONLY });
+    apply({ privileges: SESSION_ONLY });
 
     expect(model.names()).toEqual(['get_active_patient']);
     expect(model.unregisterLog).toHaveLength(12);
   });
 
-  it('replaces registrations when route context changes', () => {
-    const model = installFakeModelContext();
-    const view = renderHarness(model);
-    const firstGeneration = [...model.tools];
-
-    view.rerenderWith({ routeContext: '/patient/patient-ada' });
-
-    expect(model.unregisterLog).toHaveLength(12);
-    expect(model.names()).toEqual([...TOOL_NAMES]);
-    expect(model.tools.some((tool) => firstGeneration.includes(tool))).toBe(false);
-  });
-
-  it('aborts prior registrations on unmount', () => {
-    const model = installFakeModelContext();
-    const view = renderHarness(model);
-
-    view.unmount();
-
-    expect(model.names()).toEqual([]);
-    expect(model.unregisterLog).toHaveLength(12);
-  });
-
   it('rechecks session inside handlers and never calls createFollowup from stage_followup_task', async () => {
-    const model = installFakeModelContext();
     const createFollowup = vi.fn(() =>
       Promise.resolve({
         id: 'task-written',
@@ -272,8 +211,9 @@ describe('useWebmcpRegistration', () => {
       }),
     );
     const searchPatients = vi.fn(() => Promise.resolve([]));
-    const adapter = stubAdapter({ createFollowup, searchPatients });
-    const view = renderHarness(model, { adapter });
+    const { model, apply } = startManager({
+      adapter: stubAdapter({ createFollowup, searchPatients }),
+    });
 
     const draft: FollowupDraft = {
       draftId: 'draft-1',
@@ -287,7 +227,7 @@ describe('useWebmcpRegistration', () => {
     expect(createFollowup).not.toHaveBeenCalled();
 
     const searchTool = model.tool('search_patients');
-    view.rerenderWith({
+    apply({
       session: { authenticated: false, userId: null },
       privileges: EMPTY,
     });

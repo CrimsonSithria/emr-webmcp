@@ -7,7 +7,9 @@ import { navigateToOpenmrs, toSafeSpaPath } from './navigation';
 describe('toSafeSpaPath', () => {
   it('maps known patient chart, Tests, Tasks, and review routes', () => {
     expect(toSafeSpaPath({ kind: 'review-queue' })).toBe('/emr-webmcp');
-    expect(toSafeSpaPath({ kind: 'patient-chart', patientId: 'patient-ada' })).toBe('/patient/patient-ada');
+    expect(toSafeSpaPath({ kind: 'patient-chart', patientId: 'patient-ada' })).toBe(
+      '/patient/patient-ada/chart',
+    );
     expect(toSafeSpaPath({ kind: 'tests-dashboard', patientId: 'patient-ada' })).toBe(
       '/patient/patient-ada/chart/Results',
     );
@@ -16,7 +18,9 @@ describe('toSafeSpaPath', () => {
   });
 
   it('encodes only path parameters and never accepts a full URL', () => {
-    expect(toSafeSpaPath({ kind: 'patient-chart', patientId: 'ada lovelace' })).toBe('/patient/ada%20lovelace');
+    expect(toSafeSpaPath({ kind: 'patient-chart', patientId: 'ada lovelace' })).toBe(
+      '/patient/ada%20lovelace/chart',
+    );
     expect(toSafeSpaPath({ kind: 'task-workspace', taskId: 'task/1' })).toBe('/task/task%2F1');
   });
 

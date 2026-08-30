@@ -21,9 +21,12 @@ const TASK_CAPABILITIES: readonly EmrCapability[] = ['list-followups', 'create-f
 
 export type CapabilityProbe = () => Promise<ReadonlySet<EmrCapability>>;
 
+export const CAPABILITY_PROBE_PATIENT = 'capability-probe';
+
 export function createDefaultCapabilityProbe(options: {
   fetch: OpenmrsFetch;
   isAuthenticated: () => boolean;
+  getPatientId?: () => string | null;
 }): CapabilityProbe {
   return async () => {
     if (!options.isAuthenticated()) {
@@ -31,7 +34,7 @@ export function createDefaultCapabilityProbe(options: {
     }
 
     const capabilities = new Set<EmrCapability>(PHASE1_CAPABILITIES);
-    if (await tasksMissing(options.fetch)) {
+    if (await tasksMissing(options.fetch, probePatientId(options.getPatientId))) {
       for (const capability of TASK_CAPABILITIES) {
         capabilities.delete(capability);
       }
@@ -40,9 +43,22 @@ export function createDefaultCapabilityProbe(options: {
   };
 }
 
-async function tasksMissing(fetch: OpenmrsFetch): Promise<boolean> {
+function probePatientId(getPatientId?: () => string | null): string {
+  const id = getPatientId?.();
+  if (typeof id === 'string' && id.trim() !== '') {
+    return id;
+  }
+  return CAPABILITY_PROBE_PATIENT;
+}
+
+function tasksProbePath(patientId: string): string {
+  const search = new URLSearchParams({ patient: patientId, limit: '1' });
+  return `${TASKS_PATH}?${search.toString()}`;
+}
+
+async function tasksMissing(fetch: OpenmrsFetch, patientId: string): Promise<boolean> {
   try {
-    const response = await fetch(TASKS_PATH);
+    const response = await fetch(tasksProbePath(patientId));
     return response.status === 404;
   } catch (error) {
     return statusOf(error) === 404;

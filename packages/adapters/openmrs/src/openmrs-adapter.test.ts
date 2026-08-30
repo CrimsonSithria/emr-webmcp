@@ -148,6 +148,17 @@ describe('OpenmrsAdapter', () => {
       expect(uncapped.length).toBeLessThanOrEqual(100);
     });
 
+    it('rejects a non-empty cursor until Phase 3 pagination exists', async () => {
+      const adapter = makeAdapter();
+
+      await expectAdapterError(
+        adapter.listAbnormalResults({ limit: 10, cursor: 'page-2' }),
+        'invalid-input',
+      );
+      await expect(adapter.listAbnormalResults({ limit: 1 })).resolves.toHaveLength(1);
+      await expect(adapter.listAbnormalResults({ limit: 1, cursor: '' })).resolves.toHaveLength(1);
+    });
+
     it('fans out patient-scoped Observation reads and never omits patient', async () => {
       const store = createOpenmrsMswStore();
       const fetch = vi.fn(createOpenmrsMswFetch(store));
@@ -170,6 +181,14 @@ describe('OpenmrsAdapter', () => {
   });
 
   describe('follow-ups and assignees', () => {
+    it('rejects a non-empty cursor until Phase 3 pagination exists', async () => {
+      const adapter = makeAdapter();
+
+      await expectAdapterError(adapter.listFollowups({ limit: 10, cursor: 'page-2' }), 'invalid-input');
+      await expect(adapter.listFollowups({ limit: 1 })).resolves.toHaveLength(1);
+      await expect(adapter.listFollowups({ limit: 1, cursor: '' })).resolves.toHaveLength(1);
+    });
+
     it('maps CarePlan tasks and filters by patient, assignee, priority, and overdue', async () => {
       const adapter = makeAdapter();
       const all = await adapter.listFollowups({ limit: 100 });
