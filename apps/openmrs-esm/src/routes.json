@@ -4,9 +4,9 @@
     {
       "route": "emr-webmcp",
       "component": "root",
-      "online": true
+      "online": true,
+      "offline": true
     }
   ],
-  "extensions": [
-  ]
+  "extensions": []
 }

@@ -5,4 +5,11 @@ const config = require('openmrs/default-rspack-config');
 // hint just adds noise on every build. Disable it.
 config.overrides.performance = { hints: false };
 
+// Workspace packages use NodeNext `.js` specifiers against TypeScript sources.
+config.additionalConfig.resolve = {
+  extensionAlias: {
+    '.js': ['.ts', '.tsx', '.js'],
+  },
+};
+
 module.exports = config;

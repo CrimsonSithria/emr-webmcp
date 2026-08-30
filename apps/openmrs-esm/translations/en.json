@@ -1,4 +1,5 @@
 {
   "welcomeToModule": "Welcome to esm!",
-  "getStarted": "Get started by adding routes, extensions, or components."
+  "getStarted": "Get started by adding routes, extensions, or components.",
+  "webmcpUnavailable": "This browser does not expose WebMCP. The module remains available."
 }
