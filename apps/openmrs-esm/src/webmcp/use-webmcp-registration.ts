@@ -98,7 +98,7 @@ export function useWebmcpRegistration(input: UseWebmcpRegistrationInput): void {
   }, [authenticated, userId, privileges, capabilities, routeContext]);
 }
 
-function createSessionCheckedRuntime(ports: {
+export function createSessionCheckedRuntime(ports: {
   getAdapter: () => EmrAdapter;
   getSession: () => SessionSnapshot;
   getPrivileges: () => ReadonlySet<string>;

@@ -1,6 +1,7 @@
 import { getAsyncLifecycle, defineConfigSchema } from '@openmrs/esm-framework';
 import { configSchema } from './config-schema';
 import { moduleName } from './constants';
+import { startWebmcpLifecycle } from './webmcp/webmcp-lifecycle';
 
 const options = {
   featureName: 'emr-webmcp',
@@ -11,6 +12,7 @@ export const importTranslation = require.context('../translations', false, /.jso
 
 export function startupApp() {
   defineConfigSchema(moduleName, configSchema);
+  startWebmcpLifecycle();
 }
 
 // Root component

@@ -7,7 +7,6 @@ import {
   type ModelContextTool,
   type ToolResult,
 } from '@emr-webmcp/core';
-import { usePatient, useSession } from '@openmrs/esm-framework';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -302,18 +301,6 @@ describe('useWebmcpRegistration', () => {
 
 describe('EmrWebmcp page', () => {
   it('shows a non-blocking compatibility notice when WebMCP is absent and keeps the module usable', () => {
-    vi.mocked(useSession).mockReturnValue({
-      authenticated: true,
-      sessionId: 'session-1',
-      user: { uuid: 'user-1' },
-    } as ReturnType<typeof useSession>);
-    vi.mocked(usePatient).mockReturnValue({
-      isLoading: false,
-      patient: null,
-      patientUuid: 'patient-1',
-      error: null,
-    });
-
     expect(() => render(<EmrWebmcp />)).not.toThrow();
     expect(screen.getByTestId('emr-webmcp-shell')).toBeInTheDocument();
     expect(screen.getByTestId('webmcp-compat-notice')).toBeInTheDocument();
