@@ -1,0 +1,30 @@
+{
+  "name": "emr-webmcp",
+  "private": true,
+  "packageManager": "yarn@4.10.3",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/core",
+    "packages/adapters/*",
+    "packages/workflows/*"
+  ],
+  "scripts": {
+    "build": "yarn workspaces foreach --all --topological-dev run build",
+    "lint": "yarn workspaces foreach --all --topological-dev run lint",
+    "typecheck": "yarn workspaces foreach --all --topological-dev run typecheck",
+    "test": "vitest run",
+    "test:contract": "vitest run --project contract"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@vitest/coverage-v8": "4.1.11",
+    "eslint": "10.0.2",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.68.0",
+    "vitest": "4.1.11"
+  }
+}
