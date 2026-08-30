@@ -11,6 +11,8 @@
   },
   "devDependencies": {
     "@emr-webmcp/contract-fixture": "workspace:*",
-    "@emr-webmcp/core": "workspace:*"
+    "@emr-webmcp/core": "workspace:*",
+    "@emr-webmcp/openmrs-adapter": "workspace:^",
+    "msw": "2.15.0"
   }
 }

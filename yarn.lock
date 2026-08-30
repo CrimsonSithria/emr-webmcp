@@ -583,6 +583,8 @@ __metadata:
   dependencies:
     "@emr-webmcp/contract-fixture": "workspace:*"
     "@emr-webmcp/core": "workspace:*"
+    "@emr-webmcp/openmrs-adapter": "workspace:^"
+    msw: "npm:2.15.0"
   languageName: unknown
   linkType: soft
 
