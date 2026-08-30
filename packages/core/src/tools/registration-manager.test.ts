@@ -370,6 +370,84 @@ describe('RegistrationManager execution', () => {
     manager.logout();
     expect(child?.aborted).toBe(true);
   });
+
+  it('returns unauthorized when authorization is revoked while a handler is failing', async () => {
+    const model = new FakeModelContext();
+    const privileges = new Set(['session', 'emr-webmcp.use']);
+    let started!: () => void;
+    const startedGate = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let fail!: (reason: unknown) => void;
+    const deferred = new Promise<never>((_resolve, reject) => {
+      fail = reject;
+    });
+    const { runtime } = createRuntime({
+      get_chart_brief: () => {
+        started();
+        return deferred;
+      },
+    });
+    const manager = new RegistrationManager({ modelContext: model, runtime, deps: DEPS });
+    manager.update({
+      userId: 'user-1',
+      capabilities: new Set(ALL_CAPABILITIES),
+      privileges,
+      routeContext: '/home',
+    });
+
+    const pending = invoke(model.tool('get_chart_brief'), { patientId: 'patient-ada' });
+    await startedGate;
+    privileges.delete('emr-webmcp.use');
+    fail(new AdapterError('not-found', 'The requested result was not found.', false));
+
+    const result = await pending;
+    expect(result.ok).toBe(false);
+    expect(result.error).toEqual({
+      code: 'unauthorized',
+      message: 'Not authorized to invoke this tool.',
+      retryable: false,
+    });
+  });
+
+  it('forwards a host abort to the in-flight handler and returns unauthorized', async () => {
+    const model = new FakeModelContext();
+    let started!: () => void;
+    const startedGate = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let handlerSignal: AbortSignal | undefined;
+    const { runtime } = createRuntime({
+      get_active_patient: (_input, signal) =>
+        new Promise((_resolve, reject) => {
+          handlerSignal = signal;
+          started();
+          signal.addEventListener(
+            'abort',
+            () => {
+              reject(new Error('handler observed abort'));
+            },
+            { once: true },
+          );
+        }),
+    });
+    context(model, runtime);
+    const host = new AbortController();
+
+    const pending = invoke(model.tool('get_active_patient'), {}, host.signal);
+    await startedGate;
+    expect(handlerSignal?.aborted).toBe(false);
+    host.abort();
+
+    const result = await pending;
+    expect(handlerSignal?.aborted).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.error).toEqual({
+      code: 'unauthorized',
+      message: 'Not authorized to invoke this tool.',
+      retryable: false,
+    });
+  });
 });
 
 describe('RegistrationManager wiring', () => {

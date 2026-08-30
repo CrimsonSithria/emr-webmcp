@@ -136,13 +136,18 @@ export class RegistrationManager {
     });
   }
 
+  private invocationDenied(name: ToolName, signal: AbortSignal): boolean {
+    return signal.aborted || !this.isAuthorized(name);
+  }
+
   private async executeTool(
     name: ToolName,
     input: unknown,
     childSignal: AbortSignal,
     hostSignal: AbortSignal,
   ): Promise<ToolResult<unknown>> {
-    if (childSignal.aborted || hostSignal.aborted || !this.isAuthorized(name)) {
+    const invocationSignal = AbortSignal.any([childSignal, hostSignal]);
+    if (this.invocationDenied(name, invocationSignal)) {
       return this.unauthorized();
     }
 
@@ -156,13 +161,13 @@ export class RegistrationManager {
     }
 
     try {
-      const data = await this.runtime[name](parsed.value, childSignal);
-      if (childSignal.aborted || hostSignal.aborted || !this.isAuthorized(name)) {
+      const data = await this.runtime[name](parsed.value, invocationSignal);
+      if (this.invocationDenied(name, invocationSignal)) {
         return this.unauthorized();
       }
       return successResult(this.deps, data);
     } catch (error) {
-      if (childSignal.aborted || hostSignal.aborted) {
+      if (this.invocationDenied(name, invocationSignal)) {
         return this.unauthorized();
       }
       if (error instanceof AdapterError) {
