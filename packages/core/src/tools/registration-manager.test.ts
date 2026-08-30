@@ -255,6 +255,47 @@ describe('RegistrationManager lifecycle', () => {
       expect(result.error?.code).toBe('unauthorized');
     },
   );
+
+  it('does not re-register tools when update is called after unmount', () => {
+    const model = new FakeModelContext();
+    const { runtime } = createRuntime();
+    const manager = context(model, runtime);
+    expect(model.names()).toEqual(ALL_NAMES);
+
+    manager.unmount();
+    expect(model.names()).toEqual([]);
+
+    manager.update({
+      userId: 'user-1',
+      capabilities: new Set(ALL_CAPABILITIES),
+      privileges: new Set(['session', 'emr-webmcp.use']),
+      routeContext: '/home',
+    });
+
+    expect(model.names()).toEqual([]);
+    expect(model.tools).toHaveLength(0);
+  });
+
+  it.each(['logout', 'userChange'] as const)(
+    '%s still allows a later update to re-register tools',
+    (method) => {
+      const model = new FakeModelContext();
+      const { runtime } = createRuntime();
+      const manager = context(model, runtime);
+
+      manager[method]();
+      expect(model.names()).toEqual([]);
+
+      manager.update({
+        userId: 'user-2',
+        capabilities: new Set(ALL_CAPABILITIES),
+        privileges: new Set(['session', 'emr-webmcp.use']),
+        routeContext: '/chart',
+      });
+
+      expect(model.names()).toEqual(ALL_NAMES);
+    },
+  );
 });
 
 describe('RegistrationManager execution', () => {

@@ -56,6 +56,7 @@ export class RegistrationManager {
   private context: RegistrationContext | null = null;
   private fingerprint: string | null = null;
   private registrations: ActiveRegistration[] = [];
+  private disposed = false;
 
   constructor(options: RegistrationManagerOptions) {
     this.modelContext = options.modelContext;
@@ -64,6 +65,9 @@ export class RegistrationManager {
   }
 
   update(context: RegistrationContext): void {
+    if (this.disposed) {
+      return;
+    }
     const nextFingerprint = fingerprintOf(context);
     this.context = context;
     if (this.fingerprint === nextFingerprint) {
@@ -81,6 +85,7 @@ export class RegistrationManager {
   }
 
   unmount(): void {
+    this.disposed = true;
     this.teardown();
   }
 

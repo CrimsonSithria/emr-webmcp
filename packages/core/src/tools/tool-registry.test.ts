@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { EmrCapability } from '../contracts/capabilities.js';
 import { selectEligibleTools } from './tool-policy.js';
 import { TOOL_DEFINITIONS, type SafetyClass, type ToolDefinition } from './tool-definitions.js';
-import { TOOL_SCHEMAS } from './tool-schemas.js';
+import { TOOL_SCHEMAS, validateToolInput } from './tool-schemas.js';
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
@@ -19,6 +19,7 @@ type JsonSchema = Record<string, unknown> & {
   maximum?: number;
   format?: string;
   enum?: readonly string[];
+  const?: string;
   oneOf?: readonly JsonSchema[];
   anyOf?: readonly JsonSchema[];
 };
@@ -146,8 +147,6 @@ const TOOL_CASES: readonly ToolCase[] = [
     safetyClass: 'navigate',
     requiredCapabilities: ['navigate-tests', 'navigate-tasks'],
     description: 'Opens the native Tests dashboard or Task workspace.',
-    required: ['kind'],
-    stringMax: { patientId: 200, taskId: 200 },
   },
 ];
 
@@ -239,7 +238,12 @@ describe('tool registry', () => {
       expect(definition.safetyClass).toBe(toolCase.safetyClass);
       expect([...definition.requiredCapabilities]).toEqual([...toolCase.requiredCapabilities]);
       expect(definition.inputSchema).toBe(schemaNamed(toolCase.name));
-      expect(schema.type).toBe('object');
+      const variants = schema.oneOf ?? schema.anyOf;
+      if (variants === undefined) {
+        expect(schema.type).toBe('object');
+      } else {
+        expect(variants.length).toBeGreaterThan(0);
+      }
       assertClosedObjects(schema, toolCase.name);
 
       if (toolCase.required !== undefined) {
@@ -277,10 +281,30 @@ describe('tool registry', () => {
   });
 
   it('enumerates open_result_or_followup navigation kinds', () => {
-    expect(propertyAt(inspectSchema(schemaNamed('open_result_or_followup')), 'kind').enum).toEqual([
-      'tests-dashboard',
-      'task-workspace',
-    ]);
+    const schema = inspectSchema(schemaNamed('open_result_or_followup'));
+    const variants = schema.oneOf ?? schema.anyOf ?? [];
+    const kinds = variants.map((variant) => variant.properties?.kind?.const);
+    expect(kinds).toEqual(['tests-dashboard', 'task-workspace']);
+    expect(propertyAt(variants[0] ?? {}, 'patientId').maxLength).toBe(200);
+    expect(propertyAt(variants[1] ?? {}, 'taskId').maxLength).toBe(200);
+    expect([...(variants[1]?.required ?? [])].sort()).toEqual(['kind', 'taskId']);
+  });
+
+  it('rejects task-workspace without taskId and accepts a valid task-workspace target', () => {
+    expect(validateToolInput('open_result_or_followup', { kind: 'task-workspace' }).ok).toBe(false);
+    expect(
+      validateToolInput('open_result_or_followup', {
+        kind: 'task-workspace',
+        taskId: 'task-ada-followup',
+      }).ok,
+    ).toBe(true);
+    expect(validateToolInput('open_result_or_followup', { kind: 'tests-dashboard' }).ok).toBe(true);
+    expect(
+      validateToolInput('open_result_or_followup', {
+        kind: 'tests-dashboard',
+        patientId: 'patient-ada',
+      }).ok,
+    ).toBe(true);
   });
 
   it('enumerates list_open_followups priority values', () => {

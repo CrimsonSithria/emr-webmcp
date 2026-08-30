@@ -67,11 +67,16 @@ const zodSchemas = {
   open_patient_chart: z.strictObject({
     patientId: identifier,
   }),
-  open_result_or_followup: z.strictObject({
-    kind: z.enum(['tests-dashboard', 'task-workspace']),
-    patientId: identifier.optional(),
-    taskId: identifier.optional(),
-  }),
+  open_result_or_followup: z.discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('tests-dashboard'),
+      patientId: identifier.optional(),
+    }),
+    z.strictObject({
+      kind: z.literal('task-workspace'),
+      taskId: identifier,
+    }),
+  ]),
 } as const;
 
 export type ToolSchemaName = keyof typeof zodSchemas;
