@@ -52,6 +52,17 @@ export class OpenmrsClient {
     );
   }
 
+  listPatients(limit: number, signal?: AbortSignal): Promise<RestPatient[]> {
+    return this.collectRest<RestPatient>(
+      withQuery(OPENMRS_PATHS.patients, {
+        q: '',
+        limit: String(limit),
+        v: 'default',
+      }),
+      signal,
+    );
+  }
+
   getPatient(id: string, signal?: AbortSignal): Promise<RestPatient> {
     return this.request<RestPatient>(
       withQuery(`${OPENMRS_PATHS.patients}/${encodeURIComponent(id)}`, { v: 'default' }),
@@ -69,18 +80,15 @@ export class OpenmrsClient {
 
   searchObservations(input: {
     category: string;
-    patientId?: string;
+    patientId: string;
     signal?: AbortSignal;
   }): Promise<FhirObservation[]> {
-    const params: Record<string, string> = {
-      category: input.category,
-      _count: String(REMOTE_PAGE_SIZE),
-    };
-    if (input.patientId !== undefined) {
-      params.patient = input.patientId;
-    }
     return this.collectFhir<FhirObservation>(
-      withQuery(OPENMRS_PATHS.observations, params),
+      withQuery(OPENMRS_PATHS.observations, {
+        patient: input.patientId,
+        category: input.category,
+        _count: String(REMOTE_PAGE_SIZE),
+      }),
       input.signal,
     );
   }
@@ -113,12 +121,11 @@ export class OpenmrsClient {
     );
   }
 
-  listCarePlans(patientId?: string, signal?: AbortSignal): Promise<FhirCarePlan[]> {
-    const params: Record<string, string> = {};
-    if (patientId !== undefined) {
-      params.patient = patientId;
-    }
-    return this.collectFhir<FhirCarePlan>(withQuery(OPENMRS_PATHS.carePlans, params), signal);
+  listCarePlans(patientId: string, signal?: AbortSignal): Promise<FhirCarePlan[]> {
+    return this.collectFhir<FhirCarePlan>(
+      withQuery(OPENMRS_PATHS.carePlans, { patient: patientId }),
+      signal,
+    );
   }
 
   createCarePlan(body: FhirCarePlan, signal?: AbortSignal): Promise<FhirCarePlan> {

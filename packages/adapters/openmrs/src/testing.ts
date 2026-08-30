@@ -330,9 +330,12 @@ export function createOpenmrsMswHandlers(store: OpenmrsMswStore): RequestHandler
       }
       const url = new URL(request.url);
       const patientId = normalizeRef(url.searchParams.get('patient'));
+      if (patientId === '') {
+        return HttpResponse.json({ error: 'patient is required' }, { status: 400 });
+      }
       const category = url.searchParams.get('category');
       const matches = store.observations.filter((item) => {
-        if (patientId !== '' && observationPatientId(item) !== patientId) {
+        if (observationPatientId(item) !== patientId) {
           return false;
         }
         return category === null || observationCategory(item) === category;
@@ -378,10 +381,10 @@ export function createOpenmrsMswHandlers(store: OpenmrsMswStore): RequestHandler
         return forced;
       }
       const patientId = normalizeRef(new URL(request.url).searchParams.get('patient'));
-      const matches =
-        patientId === ''
-          ? store.carePlans
-          : store.carePlans.filter((item) => carePlanPatientId(item) === patientId);
+      if (patientId === '') {
+        return HttpResponse.json({ error: 'patient is required' }, { status: 400 });
+      }
+      const matches = store.carePlans.filter((item) => carePlanPatientId(item) === patientId);
       return HttpResponse.json({
         resourceType: 'Bundle',
         entry: matches.map((resource) => ({ resource })),

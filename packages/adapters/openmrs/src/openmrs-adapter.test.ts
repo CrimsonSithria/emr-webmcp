@@ -147,6 +147,26 @@ describe('OpenmrsAdapter', () => {
       expect(uncapped.length).toBeGreaterThan(1);
       expect(uncapped.length).toBeLessThanOrEqual(100);
     });
+
+    it('fans out patient-scoped Observation reads and never omits patient', async () => {
+      const store = createOpenmrsMswStore();
+      const fetch = vi.fn(createOpenmrsMswFetch(store));
+      const adapter = createOpenmrsAdapter({
+        fetch,
+        now: () => NOW,
+        navigate: () => undefined,
+        getActivePatientId: () => store.activePatientId,
+      });
+
+      await adapter.listAbnormalResults({ limit: 100 });
+      await adapter.listAbnormalResults({ limit: 100, patientId: 'patient-01' });
+
+      const collections = fetch.mock.calls
+        .map(([path]) => path)
+        .filter(isObservationCollection);
+      expect(collections.length).toBeGreaterThan(1);
+      expect(collections.every((path) => hasRequiredPatient(path))).toBe(true);
+    });
   });
 
   describe('follow-ups and assignees', () => {
@@ -181,6 +201,26 @@ describe('OpenmrsAdapter', () => {
         display: 'Clinic nurse',
         type: 'role',
       });
+    });
+
+    it('fans out patient-scoped CarePlan reads and never omits patient', async () => {
+      const store = createOpenmrsMswStore();
+      const fetch = vi.fn(createOpenmrsMswFetch(store));
+      const adapter = createOpenmrsAdapter({
+        fetch,
+        now: () => NOW,
+        navigate: () => undefined,
+        getActivePatientId: () => store.activePatientId,
+      });
+
+      await adapter.listFollowups({ limit: 100 });
+      await adapter.listFollowups({ limit: 100, patientId: 'patient-01' });
+
+      const collections = fetch.mock.calls
+        .map(([path]) => path)
+        .filter(isCarePlanCollection);
+      expect(collections.length).toBeGreaterThan(1);
+      expect(collections.every((path) => hasRequiredPatient(path))).toBe(true);
     });
 
     it('searches providers as people and roles as roles', async () => {
@@ -247,6 +287,18 @@ describe('OpenmrsAdapter', () => {
     it('follows FHIR next links and still applies the local abnormal cap', async () => {
       const store = createOpenmrsMswStore();
       store.observationPageSize = 2;
+      store.observations.push(
+        ...['obs-page-a', 'obs-page-b', 'obs-page-c'].map((id, index) => ({
+          resourceType: 'Observation',
+          id,
+          code: { text: `Paged potassium ${String(index)}` },
+          subject: { reference: 'Patient/patient-01', display: 'Ada Lovelace' },
+          effectiveDateTime: '2026-08-23T08:00:00.000Z',
+          category: [{ coding: [{ code: 'laboratory' }] }],
+          interpretation: [{ coding: [{ code: 'H' }] }],
+          valueQuantity: { value: 6 + index, unit: 'mmol/L' },
+        })),
+      );
       const fetch = vi.fn(createOpenmrsMswFetch(store));
       const adapter = createOpenmrsAdapter({
         fetch,
@@ -255,16 +307,17 @@ describe('OpenmrsAdapter', () => {
         getActivePatientId: () => store.activePatientId,
       });
 
-      const results = await adapter.listAbnormalResults({ limit: 100 });
-      const observationCalls = fetch.mock.calls.filter(([path]) =>
-        path.startsWith('/ws/fhir2/R4/Observation'),
-      );
+      const results = await adapter.listAbnormalResults({ limit: 100, patientId: 'patient-01' });
+      const observationCalls = fetch.mock.calls
+        .map(([path]) => path)
+        .filter(isObservationCollection);
 
       expect(results.length).toBeGreaterThan(2);
       expect(observationCalls.length).toBeGreaterThan(1);
-      expect(observationCalls.some(([path]) => path.includes('_getpagesoffset='))).toBe(true);
+      expect(observationCalls.some((path) => path.includes('_getpagesoffset='))).toBe(true);
+      expect(observationCalls.every((path) => hasRequiredPatient(path))).toBe(true);
       expect(
-        observationCalls.every(([path]) => {
+        observationCalls.every((path) => {
           const count = Number(new URL(path, 'http://openmrs.local').searchParams.get('_count'));
           return Number.isFinite(count) && count > 0 && count <= 100;
         }),
@@ -329,6 +382,19 @@ describe('OpenmrsAdapter', () => {
     });
   });
 });
+
+function isObservationCollection(path: string): boolean {
+  return new URL(path, 'http://openmrs.local').pathname === '/ws/fhir2/R4/Observation';
+}
+
+function isCarePlanCollection(path: string): boolean {
+  return new URL(path, 'http://openmrs.local').pathname === '/ws/rest/v1/tasks/careplan';
+}
+
+function hasRequiredPatient(path: string): boolean {
+  const patient = new URL(path, 'http://openmrs.local').searchParams.get('patient');
+  return typeof patient === 'string' && patient !== '';
+}
 
 function makeAdapter(store = createOpenmrsMswStore()) {
   return createOpenmrsAdapter({

@@ -175,16 +175,21 @@ class OpenmrsAdapter implements EmrAdapter {
   }
 
   async listAbnormalResults(input: ResultQuery): Promise<ResultSummary[]> {
-    const raw = await this.client.searchObservations(
-      this.observationQuery('laboratory', input.patientId),
-    );
-    const matches = present(raw.map(mapObservation)).filter((item) => {
-      if (item.interpretation === 'normal' || item.interpretation === 'unknown') {
-        return false;
+    const cap = Math.max(0, Math.min(input.limit, ABNORMAL_LIMIT));
+    const patientIds = await this.resolvePatientIds(input.patientId);
+    const matches: ResultSummary[] = [];
+    for (const patientId of patientIds) {
+      if (matches.length >= cap) {
+        break;
       }
-      return input.patientId === undefined || item.patient.id === input.patientId;
-    });
-    return matches.slice(0, Math.max(0, Math.min(input.limit, ABNORMAL_LIMIT)));
+      const raw = await this.client.searchObservations(this.observationQuery('laboratory', patientId));
+      matches.push(
+        ...present(raw.map(mapObservation)).filter(
+          (item) => item.interpretation !== 'normal' && item.interpretation !== 'unknown',
+        ),
+      );
+    }
+    return matches.slice(0, cap);
   }
 
   async getResult(resultId: string): Promise<ResultSummary> {
@@ -200,27 +205,34 @@ class OpenmrsAdapter implements EmrAdapter {
   }
 
   async listFollowups(input: FollowupQuery): Promise<FollowupSummary[]> {
-    const raw = await this.client.listCarePlans(input.patientId, this.signal);
+    const cap = Math.max(0, input.limit);
+    const patientIds = await this.resolvePatientIds(input.patientId);
     const nowMs = this.now().getTime();
-    const matches = present(raw.map(mapCarePlan)).filter((item) => {
-      if (input.patientId !== undefined && item.patient.id !== input.patientId) {
-        return false;
+    const matches: FollowupSummary[] = [];
+    for (const patientId of patientIds) {
+      if (matches.length >= cap) {
+        break;
       }
-      if (input.assigneeId !== undefined && item.assignee?.id !== input.assigneeId) {
-        return false;
-      }
-      if (input.priority !== undefined && item.priority !== input.priority) {
-        return false;
-      }
-      if (input.overdueOnly === true) {
-        if (item.dueAt === undefined) {
-          return false;
-        }
-        return Date.parse(item.dueAt) < nowMs;
-      }
-      return true;
-    });
-    return matches.slice(0, Math.max(0, input.limit));
+      const raw = await this.client.listCarePlans(patientId, this.signal);
+      matches.push(
+        ...present(raw.map(mapCarePlan)).filter((item) => {
+          if (input.assigneeId !== undefined && item.assignee?.id !== input.assigneeId) {
+            return false;
+          }
+          if (input.priority !== undefined && item.priority !== input.priority) {
+            return false;
+          }
+          if (input.overdueOnly === true) {
+            if (item.dueAt === undefined) {
+              return false;
+            }
+            return Date.parse(item.dueAt) < nowMs;
+          }
+          return true;
+        }),
+      );
+    }
+    return matches.slice(0, cap);
   }
 
   async listAssignees(query: string, limit: number): Promise<AssigneeSummary[]> {
@@ -272,16 +284,26 @@ class OpenmrsAdapter implements EmrAdapter {
 
   private observationQuery(
     category: string,
-    patientId?: string,
-  ): { category: string; patientId?: string; signal?: AbortSignal } {
-    const query: { category: string; patientId?: string; signal?: AbortSignal } = { category };
-    if (patientId !== undefined) {
-      query.patientId = patientId;
-    }
+    patientId: string,
+  ): { category: string; patientId: string; signal?: AbortSignal } {
+    const query: { category: string; patientId: string; signal?: AbortSignal } = {
+      category,
+      patientId,
+    };
     if (this.signal !== undefined) {
       query.signal = this.signal;
     }
     return query;
+  }
+
+  private async resolvePatientIds(patientId?: string): Promise<string[]> {
+    if (patientId !== undefined) {
+      return [patientId];
+    }
+    const raw = await this.client.listPatients(SEARCH_LIMIT, this.signal);
+    return present(raw.map(mapPatient))
+      .map((patient) => patient.id)
+      .slice(0, SEARCH_LIMIT);
   }
 
   private async requirePatient(patientId: string): Promise<PatientRef> {
