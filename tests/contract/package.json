@@ -1,18 +1,16 @@
 {
-  "name": "@emr-webmcp/contract-fixture",
+  "name": "@emr-webmcp/contract-tests",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
-  "dependencies": {
+  "devDependencies": {
+    "@emr-webmcp/contract-fixture": "workspace:*",
     "@emr-webmcp/core": "workspace:*"
   }
 }

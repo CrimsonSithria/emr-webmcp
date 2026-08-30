@@ -1,4 +1,5 @@
 export type { EmrAdapter } from './contracts/adapter.js';
+export { AdapterError } from './contracts/adapter-error.js';
 export type { EmrCapability, EmrNavigationTarget } from './contracts/capabilities.js';
 export type {
   AssigneeSummary,

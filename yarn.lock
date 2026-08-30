@@ -47,13 +47,24 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@emr-webmcp/contract-fixture@workspace:packages/adapters/contract-fixture":
+"@emr-webmcp/contract-fixture@workspace:*, @emr-webmcp/contract-fixture@workspace:packages/adapters/contract-fixture":
   version: 0.0.0-use.local
   resolution: "@emr-webmcp/contract-fixture@workspace:packages/adapters/contract-fixture"
+  dependencies:
+    "@emr-webmcp/core": "workspace:*"
   languageName: unknown
   linkType: soft
 
-"@emr-webmcp/core@workspace:packages/core":
+"@emr-webmcp/contract-tests@workspace:tests/contract":
+  version: 0.0.0-use.local
+  resolution: "@emr-webmcp/contract-tests@workspace:tests/contract"
+  dependencies:
+    "@emr-webmcp/contract-fixture": "workspace:*"
+    "@emr-webmcp/core": "workspace:*"
+  languageName: unknown
+  linkType: soft
+
+"@emr-webmcp/core@workspace:*, @emr-webmcp/core@workspace:packages/core":
   version: 0.0.0-use.local
   resolution: "@emr-webmcp/core@workspace:packages/core"
   dependencies:

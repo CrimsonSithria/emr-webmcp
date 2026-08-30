@@ -9,7 +9,8 @@
     "apps/*",
     "packages/core",
     "packages/adapters/*",
-    "packages/workflows/*"
+    "packages/workflows/*",
+    "tests/contract"
   ],
   "scripts": {
     "build": "yarn workspaces foreach --all --topological-dev run build",
