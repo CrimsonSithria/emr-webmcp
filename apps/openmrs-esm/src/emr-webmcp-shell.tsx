@@ -14,25 +14,10 @@ export type EmrWebmcpShellProps = {
   session: SessionPort;
 };
 
-export const EmrWebmcpShell: React.FC<EmrWebmcpShellProps> = ({ adapter, session }) => (
+export const EmrWebmcpShell: React.FC<EmrWebmcpShellProps> = () => (
   <div className={styles.container} data-testid="emr-webmcp-shell">
     <Layer>
-      <Tile className={styles.tile}>
-        <p className={styles.content} data-testid="adapter-id">
-          {adapter.id}
-        </p>
-        <p className={styles.content} data-testid="session-user-id">
-          {session.userId ?? ''}
-        </p>
-        <p className={styles.content} data-testid="session-patient-id">
-          {session.patientId ?? ''}
-        </p>
-        <ul className={styles.content} data-testid="session-privileges">
-          {[...session.privileges].map((privilege) => (
-            <li key={privilege}>{privilege}</li>
-          ))}
-        </ul>
-      </Tile>
+      <Tile className={styles.tile} />
     </Layer>
   </div>
 );
