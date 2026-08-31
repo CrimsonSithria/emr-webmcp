@@ -45,7 +45,9 @@ export const ReviewItem: React.FC<ReviewItemProps> = ({ draft, adapterId, ports 
     };
   }, [controller, draft.draftId]);
 
-  const disabled = snapshot.phase !== 'ready';
+  const disabled =
+    snapshot.disabledReason !== null ||
+    (snapshot.phase !== 'ready' && snapshot.phase !== 'failed');
 
   return (
     <article className={styles.item} data-testid="review-item" data-draft-id={draft.draftId}>

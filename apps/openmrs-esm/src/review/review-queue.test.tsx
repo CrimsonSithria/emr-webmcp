@@ -405,6 +405,30 @@ describe('visible confirmation', () => {
     expect(confirmButton()).toHaveAttribute('aria-describedby', 'confirm-reason-draft-ada-1');
   });
 
+  it('enables confirm after upstream failure and retries on second click', async () => {
+    const createFollowup = vi
+      .fn()
+      .mockRejectedValueOnce(new AdapterError('upstream', 'Upstream request failed', true))
+      .mockResolvedValueOnce(CREATED);
+    renderQueue({ createFollowup });
+    await waitFor(() => {
+      expect(confirmButton()).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.click(confirmButton());
+    await waitFor(() => {
+      expect(confirmButton()).toHaveAttribute('data-confirmation-state', 'failed');
+    });
+    expect(confirmButton()).toBeEnabled();
+
+    await user.click(confirmButton());
+    await waitFor(() => {
+      expect(confirmButton()).toHaveAttribute('data-confirmation-state', 'succeeded');
+    });
+    expect(createFollowup).toHaveBeenCalledTimes(2);
+  });
+
   it('re-validates when the browser goes offline after mount', async () => {
     let online = true;
     renderQueue({ isOnline: () => online });
