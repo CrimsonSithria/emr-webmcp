@@ -15,5 +15,5 @@ esac
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
 
-# Generated FHIR bundles stay under artifacts/simulation/ (gitignored). Never git-add them.
-exec npx -y corepack@0.36.0 yarn workspace @emr-webmcp/simulation generate "$profile"
+# Credentials come from the environment only. Never print headers or response bodies.
+exec npx -y corepack@0.36.0 yarn workspace @emr-webmcp/simulation seed "$profile"

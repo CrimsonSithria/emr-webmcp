@@ -410,7 +410,8 @@ function repoRootFromModule(): string {
 }
 
 async function main(argv: string[]): Promise<void> {
-  const id = argv[0];
+  const args = argv[0] === '--' ? argv.slice(1) : argv;
+  const id = args[0];
   if (id !== 'smoke' && id !== 'demo' && id !== 'clinic') {
     throw new Error('usage: generate <smoke|demo|clinic>');
   }
