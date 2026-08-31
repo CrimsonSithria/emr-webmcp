@@ -43,8 +43,16 @@ Local smoke is 1 or 10 VUs. Reserve 50 and 100 VUs for Crimson Prime.
 
 ## Scrubbed report
 
+The browser scenario suite writes allowlisted records to `artifacts/evaluation/raw/scenarios.json` and then aggregates them. A k6 run, when present, writes `artifacts/evaluation/raw/k6.json`. Collect both and write the lasting report once:
+
 ```bash
-npx -y corepack@0.36.0 yarn workspace @emr-webmcp/simulation test
+npx -y corepack@0.36.0 yarn test:browser
+k6 run -e PROFILE=smoke -e VUS=10 -e BASE_URL="$BASE_URL" tests/load/k6/mixed-clinic.js
+npx -y corepack@0.36.0 yarn evaluation:report
 ```
 
-Aggregation writes `artifacts/evaluation/summary.json` and `artifacts/evaluation/summary.md` at runtime only. Those files stay gitignored. Allowed fields are scenario ID, run ID, status, count, duration, percentile, HTTP class, tool name, and adapter ID.
+`yarn test:browser` already runs the aggregator after the scenario suite, so the last command is required only when you also have a k6 raw file to fold in.
+
+The lasting files are `artifacts/evaluation/latest/summary.json` and `artifacts/evaluation/latest/summary.md`. They stay gitignored. Allowed fields are scenario ID, run ID, status, count, duration, percentile, HTTP class, tool name, and adapter ID. `count` is a metric, not a virtual-user field; only `status: stress-only` omits the 50-VU gate.
+
+Unit tests under `simulation/src/report/` check redaction and the write path; they delete their own temporary directories and are not the reproduction command.

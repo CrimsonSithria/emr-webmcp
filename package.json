@@ -20,7 +20,8 @@
     "typecheck": "yarn workspaces foreach --all --topological-dev run typecheck",
     "test": "vitest run",
     "test:contract": "vitest run --project contract",
-    "test:browser": "yarn workspace @emr-webmcp/browser-tests test"
+    "test:browser": "yarn workspace @emr-webmcp/browser-tests test",
+    "evaluation:report": "yarn workspace @emr-webmcp/simulation report"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

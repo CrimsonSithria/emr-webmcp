@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint fixtures harness specs scenarios playwright.config.ts vite.config.ts",
+    "lint": "eslint fixtures harness specs scenarios reporters playwright.config.ts vite.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "playwright test"
   },

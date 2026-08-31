@@ -248,4 +248,33 @@ describe('evaluation aggregation', () => {
     expect(stress.summary.gate).toBeUndefined();
     expect(stress.summary.status).toBe('stress-only');
   });
+
+  it('keeps the 50-VU gate when count is 100 and status is success', () => {
+    const outputDir = join(EVALUATION_OUTPUT_PREFIX, `large-${crypto.randomUUID()}`);
+    evaluationDirs.push(join(repoRoot, outputDir));
+    const large = aggregateEvaluation(
+      [
+        {
+          scenarioId: 'large-clinic-bounded-read',
+          runId: 'emr-webmcp-demo-eval',
+          status: 'success',
+          count: 100,
+          duration: 880,
+          percentile: 95,
+          httpClass: '2xx',
+          toolName: 'find_unlatched_abnormal_results',
+          adapterId: 'openmrs',
+        },
+      ],
+      { runId: 'emr-webmcp-demo-eval', outputDir },
+    );
+    expect(large.summary.status).toBe('success');
+    expect(large.summary.count).toBe(100);
+    expect(large.summary.gate).toEqual({
+      vus: 50,
+      maxErrorRate: 0.01,
+      maxBoundedReadP95Ms: 1500,
+      invariantFailures: 0,
+    });
+  });
 });

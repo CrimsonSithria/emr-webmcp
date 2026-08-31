@@ -4,6 +4,8 @@ import { Counter } from 'k6/metrics';
 
 import { boundedReadParams, durationFor, resolveBaseUrl, resolveProfile } from './common.js';
 
+export { handleSummary } from './common.js';
+
 const invariantFailures = new Counter('invariant_failures');
 
 export const options = {

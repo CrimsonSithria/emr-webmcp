@@ -62,3 +62,29 @@ export function loadOptions() {
     thresholds: thresholdsFor(vus),
   };
 }
+
+export function k6EvaluationRecords(data) {
+  const vus = resolveVus();
+  const failed = data.metrics.http_req_failed ? data.metrics.http_req_failed.values.rate : 0;
+  const p95 = data.metrics.http_req_duration ? data.metrics.http_req_duration.values['p(95)'] : 0;
+  const count = data.metrics.http_reqs ? data.metrics.http_reqs.values.count : 0;
+  return [
+    {
+      scenarioId: vus >= 100 ? 'stress-mixed-clinic' : 'mixed-clinic-load',
+      runId: `emr-webmcp-${resolveProfile()}-load`,
+      status: vus >= 100 ? 'stress-only' : 'success',
+      count,
+      duration: p95,
+      percentile: 95,
+      httpClass: failed < 0.01 ? '2xx' : '5xx',
+      toolName: 'search_patients',
+      adapterId: 'openmrs',
+    },
+  ];
+}
+
+export function handleSummary(data) {
+  return {
+    'artifacts/evaluation/raw/k6.json': `${JSON.stringify(k6EvaluationRecords(data), null, 2)}\n`,
+  };
+}

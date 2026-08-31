@@ -48,7 +48,7 @@ export function aggregateEvaluation(rawRecords: unknown[], options: AggregateOpt
 
   const records = rawRecords.map((record) => redactEvaluationRecord(record));
   const runId = cleanRunId(options.runId);
-  const stress = records.some((record) => record.status === 'stress-only' || record.count === 100);
+  const stress = records.some((record) => record.status === 'stress-only');
   const first = records[0];
   const summary: EvaluationSummary = {
     runId,

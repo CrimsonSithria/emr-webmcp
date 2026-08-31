@@ -3,6 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: '.',
   testMatch: ['specs/**/*.spec.ts', 'scenarios/**/*.spec.ts'],
+  reporter: [['list'], ['./reporters/evaluation-reporter.ts']],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
