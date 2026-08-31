@@ -52,6 +52,9 @@ services:
       OMRS_CONFIG_CONNECTION_DATABASE: openmrs
       OMRS_CONFIG_CONNECTION_USERNAME: ${OMRS_DB_USER:-openmrs}
       OMRS_CONFIG_CONNECTION_PASSWORD: ${OMRS_DB_PASSWORD:-change-me}
+      # Image default is only -XX:NewSize=128m. A 2G cgroup then gives Java ~512MB heap
+      # and first-boot HTTP wedges after liquibase (Tomcat up, /openmrs never answers).
+      OMRS_JAVA_MEMORY_OPTS: "-Xms1g -Xmx3g"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/openmrs"]
       interval: 30s
@@ -66,10 +69,10 @@ services:
       resources:
         limits:
           cpus: "2.0"
-          memory: 2G
+          memory: 4G
         reservations:
           cpus: "0.5"
-          memory: 512M
+          memory: 1G
 
   frontend:
     build:
