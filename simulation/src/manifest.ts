@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
@@ -20,6 +20,12 @@ import {
 const execFileAsync = promisify(execFile);
 const REFERENCE_DATE = '20260831';
 const SHA256 = /^[a-f0-9]{64}$/;
+const FILE_UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const ORDINAL_STEM = /^(?:bundle-)?\d+$/i;
+
+export const SYNTHEA_JAR_SHA256 = {
+  'v3.4.0': '38678aab1e667d26671163824aad60ee5e30fa366f3d59d5ea5765ebb5702432',
+} as const;
 
 const sha256HexString = z.string().regex(SHA256);
 
@@ -171,7 +177,9 @@ export async function generateProfile(options: GenerateProfileOptions): Promise<
   const startedAt = now().toISOString();
   const generated = await options.runner({ profile, outputDir: profile.outputDir });
   const completedAt = now().toISOString();
-  const files = Object.fromEntries(generated.files.map((file) => [file.relativePath, file.sha256]));
+  const files = Object.fromEntries(
+    generated.files.map((file, index) => [toNamelessChecksumKey(file.relativePath, index + 1), file.sha256]),
+  );
 
   const manifest = simulationManifestSchema.parse({
     generatorVersion: generated.generatorVersion,
@@ -227,19 +235,7 @@ export function createDockerRunner(options: {
       'java',
       '-jar',
       '/synthea/synthea-with-dependencies.jar',
-      '-s',
-      String(profile.seed),
-      '-cs',
-      String(profile.seed),
-      '-r',
-      REFERENCE_DATE,
-      '-p',
-      String(profile.population),
-      '--exporter.baseDirectory=/output',
-      '--exporter.fhir.export=true',
-      '--exporter.hospital.fhir.export=false',
-      '--exporter.practitioner.fhir.export=false',
-      'Massachusetts',
+      ...syntheaCliArgs(profile),
     ];
 
     try {
@@ -259,6 +255,43 @@ export function createDockerRunner(options: {
   };
 }
 
+export function syntheaCliArgs(profile: SimulationProfile): string[] {
+  return [
+    '-s',
+    String(profile.seed),
+    '-cs',
+    String(profile.seed),
+    '-r',
+    REFERENCE_DATE,
+    '-p',
+    String(profile.population),
+    '--exporter.baseDirectory=/output',
+    '--exporter.fhir.export=true',
+    '--exporter.use_uuid_filenames=true',
+    '--exporter.hospital.fhir.export=false',
+    '--exporter.practitioner.fhir.export=false',
+    'Massachusetts',
+  ];
+}
+
+export function toNamelessChecksumKey(relativePath: string, ordinal: number): string {
+  const posix = relativePath.replaceAll('\\', '/');
+  const slash = posix.lastIndexOf('/');
+  const directory = slash >= 0 ? posix.slice(0, slash + 1) : '';
+  const stem = posix.slice(slash + 1).replace(/\.json$/i, '');
+  if (ORDINAL_STEM.test(stem)) {
+    return `${directory}${stem}.json`;
+  }
+  if (new RegExp(`^${FILE_UUID.source}$`, 'i').test(stem)) {
+    return `${directory}${stem.toLowerCase()}.json`;
+  }
+  const embedded = stem.match(new RegExp(`(${FILE_UUID.source})$`, 'i'));
+  if (embedded?.[1]) {
+    return `${directory}${embedded[1].toLowerCase()}.json`;
+  }
+  return `${directory}${String(ordinal).padStart(3, '0')}.json`;
+}
+
 export function countPatientBundles(files: ReadonlyArray<{ relativePath: string }>): number {
   return files.filter((file) => {
     const relativePath = file.relativePath.replaceAll('\\', '/');
@@ -272,40 +305,79 @@ export function countPatientBundles(files: ReadonlyArray<{ relativePath: string 
   }).length;
 }
 
-async function ensureSyntheaJar(options: {
+export async function ensureSyntheaJar(options: {
   repoRoot: string;
   release: string;
-  fetchImpl: typeof fetch;
+  fetchImpl?: typeof fetch;
+  sha256ByRelease?: Readonly<Record<string, string>>;
 }): Promise<string> {
+  const pins: Readonly<Record<string, string>> = options.sha256ByRelease ?? SYNTHEA_JAR_SHA256;
+  const expectedSha = pins[options.release];
+  if (!expectedSha) {
+    throw new Error(`No pinned SHA-256 for Synthea ${options.release}`);
+  }
+
   const jarPath = path.join(
     options.repoRoot,
     'simulation/.cache/synthea',
     options.release,
     'synthea-with-dependencies.jar',
   );
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  if (await fileSha256OrMissing(jarPath) === expectedSha) {
+    return jarPath;
+  }
+  await unlinkIfExists(jarPath);
+
+  await mkdir(path.dirname(jarPath), { recursive: true });
+  const tmpPath = `${jarPath}.${process.pid}.${Date.now()}.partial`;
   try {
-    const info = await stat(jarPath);
-    if (info.isFile() && info.size > 0) {
-      return jarPath;
+    const url = `https://github.com/synthetichealth/synthea/releases/download/${options.release}/synthea-with-dependencies.jar`;
+    const response = await fetchImpl(url);
+    if (!response.ok || !response.body) {
+      throw new Error(`Failed to download Synthea ${options.release}: ${response.status}`);
     }
+    await pipeline(Readable.fromWeb(response.body), createWriteStream(tmpPath));
+    const actualSha = await fileSha256OrMissing(tmpPath);
+    if (actualSha !== expectedSha) {
+      throw new Error(`Synthea ${options.release} SHA-256 mismatch`);
+    }
+    await rename(tmpPath, jarPath);
+    return jarPath;
+  } catch (error) {
+    await unlinkIfExists(tmpPath);
+    await unlinkIfExists(jarPath);
+    throw error;
+  }
+}
+
+async function fileSha256OrMissing(filePath: string): Promise<string | undefined> {
+  try {
+    const hash = createHash('sha256');
+    await pipeline(createReadStream(filePath), hash);
+    return hash.digest('hex');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function unlinkIfExists(filePath: string): Promise<void> {
+  try {
+    await unlink(filePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw error;
     }
   }
-
-  await mkdir(path.dirname(jarPath), { recursive: true });
-  const url = `https://github.com/synthetichealth/synthea/releases/download/${options.release}/synthea-with-dependencies.jar`;
-  const response = await options.fetchImpl(url);
-  if (!response.ok || !response.body) {
-    throw new Error(`Failed to download Synthea ${options.release}: ${response.status}`);
-  }
-  await pipeline(Readable.fromWeb(response.body), createWriteStream(jarPath));
-  return jarPath;
 }
 
 async function hashOutputFiles(root: string): Promise<Array<{ relativePath: string; sha256: string }>> {
   const files: Array<{ relativePath: string; sha256: string }> = [];
+  let ordinal = 0;
 
   async function walk(directory: string): Promise<void> {
     const entries = await readdir(directory, { withFileTypes: true });
@@ -318,7 +390,11 @@ async function hashOutputFiles(root: string): Promise<Array<{ relativePath: stri
       if (!entry.isFile() || entry.name === 'manifest.json') {
         continue;
       }
-      const relativePath = path.relative(root, fullPath).split(path.sep).join('/');
+      ordinal += 1;
+      const relativePath = toNamelessChecksumKey(
+        path.relative(root, fullPath).split(path.sep).join('/'),
+        ordinal,
+      );
       const sha256 = createHash('sha256').update(await readFile(fullPath)).digest('hex');
       files.push({ relativePath, sha256 });
     }

@@ -8,6 +8,7 @@ export default defineConfig({
       'packages/core',
       'packages/adapters/*',
       'packages/workflows/*',
+      'simulation',
       {
         test: {
           name: 'contract',
