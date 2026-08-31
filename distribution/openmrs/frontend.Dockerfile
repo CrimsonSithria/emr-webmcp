@@ -26,12 +26,17 @@ RUN tar -czf /app/emr-webmcp-openmrs-esm.tgz -C /module package
 COPY distribution/openmrs/spa-assemble-config.json /app/spa-assemble-config.json
 COPY distribution/openmrs/spa-build-config.json /app/spa-build-config.json
 COPY distribution/openmrs/verify-import-map.mjs /app/verify-import-map.mjs
+COPY distribution/openmrs/inject-local-module.mjs /app/inject-local-module.mjs
 
 ARG CACHE_BUST
+# `openmrs assemble` treats `file:*.tgz` as a directory and then open()s it
+# (EISDIR). Official modules assemble first; the local artifact is injected.
+RUN node --input-type=module -e "import { readFileSync, writeFileSync } from 'node:fs'; const path='spa-assemble-config.json'; const config=JSON.parse(readFileSync(path,'utf8')); delete config.frontendModules['@emr-webmcp/openmrs-esm']; writeFileSync(path, JSON.stringify(config));"
 RUN npx --legacy-peer-deps openmrs@${APP_SHELL_VERSION:-next} assemble --manifest --mode config --config spa-assemble-config.json --target ./spa
-RUN node verify-import-map.mjs ./spa/importmap.json
 RUN npx --legacy-peer-deps openmrs@${APP_SHELL_VERSION:-next} build --build-config spa-build-config.json --target ./spa
 RUN if [ ! -f ./spa/index.html ]; then echo 'Build failed. Please check the logs above for details. This may have happened because of an update to a library that OpenMRS depends on.'; exit 1; fi
+RUN node inject-local-module.mjs ./spa /module/package/dist
+RUN node verify-import-map.mjs ./spa/importmap.json
 
 FROM nginx:1.31-alpine@sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913
 
