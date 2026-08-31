@@ -1,0 +1,15 @@
+.git
+.agentforest
+.superpowers
+.openwiki
+openwiki
+** /node_modules
+.yarn/cache
+.yarn/install-state.gz
+artifacts
+coverage
+playwright-report
+test-results
+simulation/generated
+simulation/.cache
+**/*.log

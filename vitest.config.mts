@@ -11,6 +11,12 @@ export default defineConfig({
       'simulation',
       {
         test: {
+          name: 'distribution-openmrs',
+          include: ['distribution/openmrs/**/*.test.ts'],
+        },
+      },
+      {
+        test: {
           name: 'contract',
           include: ['tests/contract/src/**/*.test.ts'],
         },

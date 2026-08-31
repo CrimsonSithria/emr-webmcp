@@ -1,0 +1,174 @@
+name: emr-webmcp
+
+# Isolated OpenMRS 3 reference stack. The gateway is the only published port
+# and binds loopback:18080 by default — never host 80/443 (OpenShip owns those).
+#
+# Image digest refresh:
+#   docker buildx imagetools inspect mariadb:10.11.7 --format '{{json .Manifest}}'
+#   docker buildx imagetools inspect openmrs/openmrs-reference-application-3-backend:qa --format '{{json .Manifest}}'
+#   docker buildx imagetools inspect openmrs/openmrs-reference-application-3-gateway:qa --format '{{json .Manifest}}'
+#   docker buildx imagetools inspect node:22-alpine --format '{{json .Manifest}}'
+
+services:
+  db:
+    image: mariadb:10.11.7@sha256:27292753bb759cd22be72e3c8192f1259ef47010c8634b5da0bc886845efe9fd
+    restart: unless-stopped
+    command: "mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci"
+    environment:
+      MYSQL_DATABASE: openmrs
+      MYSQL_USER: ${OMRS_DB_USER:-openmrs}
+      MYSQL_PASSWORD: ${OMRS_DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-me}
+    healthcheck:
+      test: ["CMD-SHELL", "mysql --user=\"$$MYSQL_USER\" --password=\"$$MYSQL_PASSWORD\" --execute \"SHOW DATABASES;\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    volumes:
+      - emr-webmcp-db:/var/lib/mysql
+    networks:
+      - emr-webmcp
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  backend:
+    image: openmrs/openmrs-reference-application-3-backend:qa@sha256:b90294dc5905195a4e146d0824ad90cb7c60a70afa653a86483c3fcf7a37c6d9
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      OMRS_CONFIG_MODULE_WEB_ADMIN: "true"
+      OMRS_CONFIG_AUTO_UPDATE_DATABASE: "true"
+      OMRS_CONFIG_CREATE_TABLES: "true"
+      OMRS_CONFIG_CONNECTION_SERVER: db
+      OMRS_CONFIG_CONNECTION_DATABASE: openmrs
+      OMRS_CONFIG_CONNECTION_USERNAME: ${OMRS_DB_USER:-openmrs}
+      OMRS_CONFIG_CONNECTION_PASSWORD: ${OMRS_DB_PASSWORD:-change-me}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/openmrs"]
+      interval: 30s
+      timeout: 10s
+      retries: 40
+      start_period: 180s
+    volumes:
+      - emr-webmcp-openmrs-data:/openmrs/data
+    networks:
+      - emr-webmcp
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: distribution/openmrs/frontend.Dockerfile
+      args:
+        APP_SHELL_VERSION: ${APP_SHELL_VERSION:-next}
+    image: emr-webmcp/openmrs-frontend:local
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      SPA_PATH: /openmrs/spa
+      API_URL: /openmrs
+      SPA_CONFIG_URLS: ""
+      SPA_DEFAULT_LOCALE: en_GB
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - emr-webmcp
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
+  gateway:
+    image: openmrs/openmrs-reference-application-3-gateway:qa@sha256:003209be27cabcc3250fba762f9c25c34beafed4499bb1cb4ce5c6db5e2a26ff
+    restart: unless-stopped
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    ports:
+      - "${EMR_WEBMCP_BIND_ADDRESS:-127.0.0.1}:${EMR_WEBMCP_PORT:-18080}:80"
+    volumes:
+      - ../../distribution/openmrs/gateway.conf:/etc/nginx/conf-templates/default.conf.template:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - emr-webmcp
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+
+  event-pump:
+    profiles:
+      - event-pump
+    image: node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    working_dir: /workspace
+    volumes:
+      - ../../simulation:/workspace/simulation:ro
+    command:
+      - node
+      - --experimental-strip-types
+      - /workspace/simulation/src/event-pump.ts
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    networks:
+      - emr-webmcp
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+
+volumes:
+  emr-webmcp-db:
+  emr-webmcp-openmrs-data:
+
+networks:
+  emr-webmcp:
+    name: emr-webmcp-internal
+    driver: bridge
