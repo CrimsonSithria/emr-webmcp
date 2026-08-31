@@ -284,16 +284,24 @@ emr_apply_image_manifest() {
 import json
 import sys
 
+LOCAL_FRONTEND = "emr-webmcp/openmrs-frontend:local"
 data = json.loads(open(sys.argv[1], encoding="utf-8").read())
 if not isinstance(data, dict):
     raise SystemExit("image manifest must be an object")
-for service, entry in data.items():
+for entry in data.values():
     if not isinstance(entry, dict):
         continue
     image_id = entry.get("id")
     ref = entry.get("ref")
-    if isinstance(image_id, str) and image_id and isinstance(ref, str) and ref:
-        print(f"{image_id}\t{ref}")
+    if not isinstance(image_id, str) or not image_id:
+        continue
+    if not isinstance(ref, str) or not ref:
+        continue
+    if "@" in ref:
+        continue
+    if ref != LOCAL_FRONTEND:
+        continue
+    print(f"{image_id}\t{ref}")
 PY
 }
 

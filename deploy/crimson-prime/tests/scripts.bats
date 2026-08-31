@@ -49,6 +49,11 @@ if [[ "${1:-}" == "info" ]]; then
   exit "${STUB_DOCKER_INFO_EXIT:-0}"
 fi
 if [[ "${1:-}" == "tag" ]]; then
+  target="${*: -1}"
+  if [[ "${target}" == *@* ]]; then
+    printf 'refusing to create a tag with a digest reference\n' >&2
+    exit 1
+  fi
   exit 0
 fi
 if [[ "${1:-}" != "compose" ]]; then
@@ -333,6 +338,23 @@ EOF
   [ ! -f "${EMR_WEBMCP_STUB_DIR}/restore.called" ]
   grep -E '(^| )up( |$)' "${EMR_WEBMCP_STUB_LOG}"
   grep -E '(^| )tag sha256:previous-frontend emr-webmcp/openmrs-frontend:local( |$)' "${EMR_WEBMCP_STUB_LOG}"
+  ! grep -E 'tag .*@sha256' "${EMR_WEBMCP_STUB_LOG}"
+  _assert_redacted "${output}"
+}
+
+@test "rollback skips digest-pinned refs and retags only the local frontend" {
+  local previous="${EMR_WEBMCP_BACKUP_DIR}/20260831T020000Z"
+  mkdir -p "${previous}"
+  cat >"${previous}/image-manifest.json" <<'EOF'
+{"db":{"ref":"mariadb:10.11.7@sha256:deadbeefdb","id":"sha256:olddb"},"backend":{"ref":"openmrs/openmrs-reference-application-3-backend:qa@sha256:deadbeefbe","id":"sha256:oldbackend"},"frontend":{"ref":"emr-webmcp/openmrs-frontend:local","id":"sha256:previous-frontend"},"gateway":{"ref":"openmrs/openmrs-reference-application-3-gateway:qa@sha256:deadbeefgw","id":"sha256:oldgateway"}}
+EOF
+  cp "${EMR_WEBMCP_ROOT}/deploy/crimson-prime/compose.yml" "${previous}/compose.yml"
+  printf '20260831T020000Z\n' >"${EMR_WEBMCP_BACKUP_DIR}/PREVIOUS"
+  run "${SCRIPTS_DIR}/rollback.sh"
+  [ "${status}" -eq 0 ]
+  grep -E '(^| )up( |$)' "${EMR_WEBMCP_STUB_LOG}"
+  grep -E '(^| )tag sha256:previous-frontend emr-webmcp/openmrs-frontend:local( |$)' "${EMR_WEBMCP_STUB_LOG}"
+  ! grep -E 'tag .*@sha256' "${EMR_WEBMCP_STUB_LOG}"
   _assert_redacted "${output}"
 }
 
