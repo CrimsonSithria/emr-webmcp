@@ -2,11 +2,14 @@ import {
   AdapterError,
   DraftStore,
   RegistrationManager,
+  type AppointmentSummary,
+  type AssigneeSummary,
   type ConfirmedFollowup,
   type EmrAdapter,
   type EmrCapability,
   type FollowupDraft,
   type FollowupSummary,
+  type PatientRef,
   type ResultSummary,
   type ToolResult,
 } from '@emr-webmcp/core';
@@ -19,7 +22,7 @@ import {
   createSessionCheckedRuntime,
   type SessionSnapshot,
 } from '../../../apps/openmrs-esm/src/webmcp/use-webmcp-registration';
-import type { ReviewHarness } from '../fixtures/harness-globals';
+import type { ClinicProfileName, ReviewHarness } from '../fixtures/harness-globals';
 import { installFakeModelContext } from '../fixtures/model-context';
 
 const ALL_CAPABILITIES: readonly EmrCapability[] = [
@@ -46,7 +49,35 @@ const SOURCE: ResultSummary = {
   sourceReference: 'Observation/obs-1',
 };
 
+const CRITICAL_SOURCE: ResultSummary = {
+  id: 'obs-critical-1',
+  patient: { id: 'patient-1', display: 'Ada Lovelace' },
+  name: 'analyte-critical',
+  observedAt: '2026-08-31T04:05:00.000Z',
+  interpretation: 'critical-high',
+  sourceReference: 'Observation/obs-critical-1',
+};
+
+const DEFAULT_CONFIRMED: ConfirmedFollowup = {
+  patient: SOURCE.patient,
+  title: 'Follow up potassium',
+  rationale: 'Repeat the BMP in clinic after the high potassium result.',
+  priority: 'high',
+  dueAt: '2026-09-01T09:00:00.000Z',
+  assignee: { id: 'person-dr-chen', display: 'Dr. Chen', type: 'person' },
+  sourceReference: 'Observation/obs-1',
+};
+
 type NetworkRequest = { method: string; url: string };
+
+type ClinicState = {
+  profile: ClinicProfileName;
+  patients: PatientRef[];
+  appointments: AppointmentSummary[];
+  results: ResultSummary[];
+  assignees: AssigneeSummary[];
+  activePatient: PatientRef | null;
+};
 
 const requests: NetworkRequest[] = [];
 const created: FollowupSummary[] = [];
@@ -76,31 +107,128 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   return originalFetch(input, init);
 };
 
+function buildClinic(profile: ClinicProfileName): ClinicState {
+  if (profile === 'empty') {
+    return {
+      profile,
+      patients: [],
+      appointments: [],
+      results: [],
+      assignees: [],
+      activePatient: null,
+    };
+  }
+  if (profile === 'large') {
+    const patients = Array.from({ length: 80 }, (_, index) => {
+      const ordinal = String(index + 1).padStart(3, '0');
+      return { id: `patient-syn-${ordinal}`, display: `Synthetic ${ordinal}` };
+    });
+    const results = Array.from({ length: 100 }, (_, index) => {
+      const interpretations = ['high', 'critical-high', 'low', 'critical-low', 'normal'] as const;
+      const interpretation = interpretations[index % interpretations.length] ?? 'high';
+      const patient = patients[index % patients.length] ?? patients[0];
+      const ordinal = String(index + 1).padStart(3, '0');
+      return {
+        id: `obs-syn-${ordinal}`,
+        patient: patient ?? { id: `patient-syn-${ordinal}`, display: `Synthetic ${ordinal}` },
+        name: `analyte-${ordinal}`,
+        observedAt: '2026-08-31T04:00:00.000Z',
+        interpretation,
+        sourceReference: `Observation/obs-syn-${ordinal}`,
+      };
+    });
+    const appointments = Array.from({ length: 40 }, (_, index) => {
+      const ordinal = String(index + 1).padStart(3, '0');
+      const patient = patients[index % patients.length] ?? patients[0];
+      return {
+        id: `appt-syn-${ordinal}`,
+        patient: patient ?? { id: `patient-syn-${ordinal}`, display: `Synthetic ${ordinal}` },
+        start: '2026-08-31T09:00:00.000Z',
+        status: 'scheduled' as const,
+      };
+    });
+    return {
+      profile,
+      patients,
+      appointments,
+      results,
+      assignees: [{ id: 'person-syn-001', display: 'Synthetic Clinician', type: 'person' }],
+      activePatient: patients[0] ?? null,
+    };
+  }
+  return {
+    profile,
+    patients: [SOURCE.patient],
+    appointments: [],
+    results: [SOURCE, CRITICAL_SOURCE],
+    assignees: [{ id: 'person-dr-chen', display: 'Dr. Chen', type: 'person' }],
+    activePatient: SOURCE.patient,
+  };
+}
+
+let clinic = buildClinic('default');
+let capabilities: Set<EmrCapability> = new Set(ALL_CAPABILITIES);
+let online = true;
+let shownPatients: PatientRef[] = [];
+
 const adapter: EmrAdapter = {
   id: 'openmrs',
-  getCapabilities: () => Promise.resolve(new Set(ALL_CAPABILITIES)),
-  getActivePatient: () => Promise.resolve(SOURCE.patient),
-  searchPatients: () => Promise.resolve([SOURCE.patient]),
-  listAppointments: () => Promise.resolve([]),
-  getChartBrief: () =>
-    Promise.resolve({
-      patient: SOURCE.patient,
+  getCapabilities: () => Promise.resolve(new Set(capabilities)),
+  getActivePatient: () => Promise.resolve(clinic.activePatient),
+  searchPatients: (query, limit) => {
+    const needle = query.trim().toLowerCase();
+    const matches = clinic.patients.filter(
+      (patient) => patient.id.toLowerCase().includes(needle) || patient.display.toLowerCase().includes(needle),
+    );
+    return Promise.resolve(matches.slice(0, limit));
+  },
+  listAppointments: () => Promise.resolve([...clinic.appointments]),
+  getChartBrief: (patientId) => {
+    const patient = clinic.patients.find((item) => item.id === patientId);
+    if (patient === undefined) {
+      return Promise.reject(new AdapterError('not-found', 'Patient was not found.', false));
+    }
+    const recentResults = clinic.results.filter((item) => item.patient.id === patientId);
+    return Promise.resolve({
+      patient,
       conditions: [],
       allergies: [],
       medications: [],
       recentVitals: [],
-      recentResults: [SOURCE],
-      openTasks: created.filter((item) => item.status === 'not-started' || item.status === 'in-progress'),
-    }),
-  listAbnormalResults: () => Promise.resolve([SOURCE]),
+      recentResults,
+      openTasks: created.filter(
+        (item) =>
+          item.patient.id === patientId && (item.status === 'not-started' || item.status === 'in-progress'),
+      ),
+    });
+  },
+  listAbnormalResults: (input) => {
+    const abnormal = clinic.results.filter((item) => {
+      if (item.interpretation === 'normal') {
+        return false;
+      }
+      return input.patientId === undefined || item.patient.id === input.patientId;
+    });
+    return Promise.resolve(abnormal.slice(0, input.limit));
+  },
   getResult: (resultId) => {
-    if (resultId !== SOURCE.id) {
+    const found = clinic.results.find((item) => item.id === resultId);
+    if (found === undefined) {
       return Promise.reject(new AdapterError('not-found', 'Result was not found.', false));
     }
-    return Promise.resolve(SOURCE);
+    return Promise.resolve(found);
   },
-  listFollowups: () => Promise.resolve([...created]),
-  listAssignees: () => Promise.resolve([]),
+  listFollowups: (query) => {
+    const items = created.filter((item) => query.patientId === undefined || item.patient.id === query.patientId);
+    return Promise.resolve(items.slice(0, query.limit));
+  },
+  listAssignees: (query, limit) => {
+    const needle = query.trim().toLowerCase();
+    const matches = clinic.assignees.filter(
+      (item) => item.id.toLowerCase().includes(needle) || item.display.toLowerCase().includes(needle),
+    );
+    return Promise.resolve(matches.slice(0, limit));
+  },
   createFollowup: async (input) => {
     const duplicate = created.some(
       (item) =>
@@ -156,6 +284,7 @@ function apply(): void {
     manager.logout();
     store.logout();
     renderQueue();
+    renderClinic();
     previousUserId = null;
     return;
   }
@@ -166,11 +295,12 @@ function apply(): void {
   manager.update({
     userId: session.userId,
     privileges,
-    capabilities: new Set(ALL_CAPABILITIES),
+    capabilities,
     routeContext,
   });
   previousUserId = session.userId;
   renderQueue();
+  renderClinic();
 }
 
 function renderQueue(): void {
@@ -192,7 +322,7 @@ const ports: ConfirmationPorts = {
   createFollowup: (input) => adapter.createFollowup(input),
   isAuthenticated: () => session.authenticated && session.userId !== null,
   hasUsePrivilege: () => privileges.has('emr-webmcp.use'),
-  isOnline: () => navigator.onLine,
+  isOnline: () => online,
 };
 
 function renderItem(draft: FollowupDraft): HTMLElement {
@@ -243,12 +373,159 @@ function escapeHtml(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
+function replaceList(testId: string, labels: readonly string[]): void {
+  const root = document.querySelector(`[data-testid="${testId}"]`);
+  if (!(root instanceof HTMLElement)) {
+    return;
+  }
+  root.replaceChildren();
+  for (const label of labels) {
+    const item = document.createElement('li');
+    item.textContent = label;
+    root.append(item);
+  }
+}
+
+function setText(testId: string, value: string): void {
+  const node = document.querySelector(`[data-testid="${testId}"]`);
+  if (node instanceof HTMLElement) {
+    node.textContent = value;
+  }
+}
+
+function renderClinic(): void {
+  setText('clinic-profile', clinic.profile);
+  setText(
+    'clinic-counts',
+    `patients=${clinic.patients.length} appointments=${clinic.appointments.length} results=${clinic.results.length} shown=${shownPatients.length}`,
+  );
+  setText('auth-state', session.authenticated && session.userId !== null ? 'signed-in' : 'signed-out');
+  setText('active-patient', clinic.activePatient?.id ?? 'none');
+  const unsupported = document.querySelector('[data-testid="unsupported-note"]');
+  if (unsupported instanceof HTMLElement) {
+    unsupported.hidden = capabilities.has('search-patients');
+  }
+  replaceList(
+    'patient-search-results',
+    shownPatients.map((patient) => patient.id),
+  );
+  replaceList(
+    'appointment-list',
+    clinic.appointments.map((item) => item.id),
+  );
+  replaceList(
+    'abnormal-results',
+    clinic.results.filter((item) => item.interpretation !== 'normal').map((item) => `${item.id}:${item.interpretation}`),
+  );
+  replaceList(
+    'followup-list',
+    created.map((item) => item.id),
+  );
+  replaceList(
+    'assignee-list',
+    clinic.assignees.map((item) => item.id),
+  );
+}
+
+async function refreshClinicPanel(): Promise<void> {
+  const active = await adapter.getActivePatient();
+  setText('active-patient', active?.id ?? 'none');
+  if (active !== null) {
+    try {
+      const brief = await adapter.getChartBrief(active.id);
+      setText('chart-brief', `results=${brief.recentResults.length}`);
+    } catch {
+      setText('chart-brief', 'empty');
+    }
+  } else {
+    setText('chart-brief', 'empty');
+  }
+  const appointments = await adapter.listAppointments({
+    start: '2026-08-31T00:00:00.000Z',
+    end: '2026-09-06T23:59:59.000Z',
+  });
+  const abnormal = await adapter.listAbnormalResults({ limit: 100 });
+  const followups = await adapter.listFollowups({ limit: 100 });
+  const assignees = await adapter.listAssignees('person', 20);
+  replaceList(
+    'appointment-list',
+    appointments.map((item) => item.id),
+  );
+  replaceList(
+    'abnormal-results',
+    abnormal.map((item) => `${item.id}:${item.interpretation}`),
+  );
+  replaceList(
+    'followup-list',
+    followups.map((item) => item.id),
+  );
+  replaceList(
+    'assignee-list',
+    assignees.map((item) => item.id),
+  );
+}
+
 async function invokeTool(name: string, input: unknown): Promise<ToolResult<unknown>> {
-  const tool = model.tool(name);
-  return (await tool.execute(input, new AbortController().signal)) as ToolResult<unknown>;
+  try {
+    const tool = model.tool(name);
+    return (await tool.execute(input, new AbortController().signal)) as ToolResult<unknown>;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('tool ')) {
+      return {
+        ok: false,
+        error: { code: 'unsupported', message: 'Capability is not available.', retryable: false },
+        meta: {
+          invocationId: crypto.randomUUID(),
+          adapterId: adapter.id,
+          generatedAt: new Date().toISOString(),
+          truncated: false,
+        },
+      };
+    }
+    throw error;
+  }
+}
+
+function bindUi(): void {
+  document.querySelector('[data-testid="patient-search-submit"]')?.addEventListener('click', () => {
+    const input = document.querySelector('[data-testid="patient-search"]');
+    const query = input instanceof HTMLInputElement ? input.value : 'patient';
+    void adapter.searchPatients(query, 20).then((patients) => {
+      shownPatients = patients;
+      renderClinic();
+    });
+  });
+  document.querySelector('[data-testid="refresh-reads"]')?.addEventListener('click', () => {
+    void refreshClinicPanel();
+  });
+  document.querySelector('[data-testid="navigate-chart"]')?.addEventListener('click', () => {
+    const patientId = clinic.activePatient?.id ?? clinic.patients[0]?.id;
+    if (patientId === undefined) {
+      return;
+    }
+    void adapter.navigate({ kind: 'patient-chart', patientId });
+  });
+  document.querySelector('[data-testid="navigate-review"]')?.addEventListener('click', () => {
+    void adapter.navigate({ kind: 'review-queue' });
+  });
+  document.querySelector('[data-testid="stage-followup"]')?.addEventListener('click', () => {
+    store.stage(DEFAULT_CONFIRMED);
+    renderQueue();
+  });
+  document.querySelector('[data-testid="logout"]')?.addEventListener('click', () => {
+    session = { authenticated: false, userId: null };
+    privileges = new Set();
+    apply();
+  });
+  document.querySelector('[data-testid="apply-route"]')?.addEventListener('click', () => {
+    const input = document.querySelector('[data-testid="route-input"]');
+    routeContext = input instanceof HTMLInputElement ? input.value : '/emr-webmcp';
+    apply();
+  });
 }
 
 apply();
+bindUi();
 
 const harness: ReviewHarness = {
   writeMethods(): string[] {
@@ -307,6 +584,44 @@ const harness: ReviewHarness = {
     manager.unmount();
     store.logout();
     renderQueue();
+  },
+  setClinicProfile(profile: ClinicProfileName): void {
+    clinic = buildClinic(profile);
+    shownPatients = [];
+    renderClinic();
+  },
+  setCapabilities(names: string[]): void {
+    capabilities = new Set(names as EmrCapability[]);
+    apply();
+  },
+  setPrivileges(names: string[]): void {
+    privileges = new Set(names);
+    apply();
+  },
+  setOnline(next: boolean): void {
+    online = next;
+    window.dispatchEvent(new Event(next ? 'online' : 'offline'));
+    renderQueue();
+  },
+  addResult(result: ResultSummary): void {
+    clinic.results = [...clinic.results, result];
+    renderClinic();
+  },
+  removeResult(resultId: string): void {
+    clinic.results = clinic.results.filter((item) => item.id !== resultId);
+    renderQueue();
+    renderClinic();
+  },
+  refreshClinic(): Promise<void> {
+    return refreshClinicPanel();
+  },
+  clinicCounts(): { patients: number; appointments: number; results: number; shownPatients: number } {
+    return {
+      patients: clinic.patients.length,
+      appointments: clinic.appointments.length,
+      results: clinic.results.length,
+      shownPatients: shownPatients.length,
+    };
   },
 };
 

@@ -12,6 +12,7 @@
     "fixtures/**/*.d.ts",
     "harness/**/*.ts",
     "specs/**/*.ts",
+    "scenarios/**/*.ts",
     "playwright.config.ts",
     "vite.config.ts"
   ]
