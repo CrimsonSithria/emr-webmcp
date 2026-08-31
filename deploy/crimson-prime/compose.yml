@@ -115,7 +115,7 @@ services:
     ports:
       - "${EMR_WEBMCP_BIND_ADDRESS:-127.0.0.1}:${EMR_WEBMCP_PORT:-18080}:80"
     volumes:
-      - ../../distribution/openmrs/gateway.conf:/etc/nginx/conf-templates/default.conf.template:ro
+      - ../../distribution/openmrs/gateway.conf:/etc/nginx/templates/default.conf.template:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
       interval: 15s
