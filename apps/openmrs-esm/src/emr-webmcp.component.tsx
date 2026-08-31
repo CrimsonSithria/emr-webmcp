@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 
 import { EmrWebmcpShell, type SessionPort } from './emr-webmcp-shell';
 import styles from './emr-webmcp.scss';
+import { ReviewQueue } from './review/review-queue.component';
+import { useReviewWorkspace } from './review/review-workspace';
 import { hasDocumentModelContext } from './webmcp/document-model-context';
 
 const placeholderSession: SessionPort = {
@@ -13,6 +15,7 @@ const placeholderSession: SessionPort = {
 
 const EmrWebmcp: React.FC = () => {
   const { t } = useTranslation();
+  const workspace = useReviewWorkspace();
 
   return (
     <>
@@ -21,7 +24,8 @@ const EmrWebmcp: React.FC = () => {
           {t('webmcpUnavailable', 'This browser does not expose WebMCP. The module remains available.')}
         </p>
       )}
-      <EmrWebmcpShell adapter={{ id: 'openmrs' }} session={placeholderSession} />
+      <EmrWebmcpShell adapter={{ id: workspace.adapterId }} session={placeholderSession} />
+      <ReviewQueue drafts={workspace.drafts} adapterId={workspace.adapterId} ports={workspace.ports} />
     </>
   );
 };

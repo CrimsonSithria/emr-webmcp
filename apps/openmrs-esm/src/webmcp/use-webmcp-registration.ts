@@ -1,5 +1,7 @@
 import {
   AdapterError,
+  type ConfirmedFollowup,
+  type DraftStore,
   type EmrAdapter,
   type FollowupDraft,
   type ToolName,
@@ -15,7 +17,8 @@ export function createSessionCheckedRuntime(ports: {
   getAdapter: () => EmrAdapter;
   getSession: () => SessionSnapshot;
   getPrivileges: () => ReadonlySet<string>;
-  drafts: Map<string, FollowupDraft>;
+  getDraftStore: () => DraftStore;
+  onDraftsChanged?: () => void;
 }): ToolRuntime {
   const requireLive = (name: ToolName): void => {
     const session = ports.getSession();
@@ -73,8 +76,8 @@ export function createSessionCheckedRuntime(ports: {
     },
     stage_followup_task: async (input) => {
       requireLive('stage_followup_task');
-      const draft = input as FollowupDraft;
-      ports.drafts.set(draft.draftId, draft);
+      const draft = ports.getDraftStore().stage(toConfirmedInput(input as FollowupDraft));
+      ports.onDraftsChanged?.();
       return { draftId: draft.draftId };
     },
     open_review_queue: async () => {
@@ -97,6 +100,25 @@ export function createSessionCheckedRuntime(ports: {
       return { opened: target.kind };
     },
   };
+}
+
+function toConfirmedInput(input: FollowupDraft): ConfirmedFollowup {
+  const confirmed: ConfirmedFollowup = {
+    patient: input.patient,
+    title: input.title,
+    rationale: input.rationale,
+    priority: input.priority,
+  };
+  if (input.dueAt !== undefined) {
+    confirmed.dueAt = input.dueAt;
+  }
+  if (input.assignee !== undefined) {
+    confirmed.assignee = input.assignee;
+  }
+  if (input.sourceReference !== undefined) {
+    confirmed.sourceReference = input.sourceReference;
+  }
+  return confirmed;
 }
 
 function unauthorized(): AdapterError {

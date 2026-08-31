@@ -40,11 +40,13 @@ export function createO3OpenmrsAdapter(options: {
   getActivePatientId: () => string | null;
   fetch?: OpenmrsFetch;
   navigatePath?: (path: string) => void;
+  canCreateFollowup?: () => boolean;
 }) {
   const fetch = options.fetch ?? wrapOpenmrsFetch();
   return createOpenmrsAdapter({
     fetch,
     getActivePatientId: options.getActivePatientId,
+    canCreateFollowup: options.canCreateFollowup ?? (() => true),
     navigate: (target) => {
       const path = toSafeSpaPath(target);
       if (options.navigatePath !== undefined) {

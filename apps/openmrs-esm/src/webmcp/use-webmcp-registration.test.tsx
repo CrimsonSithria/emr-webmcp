@@ -1,4 +1,5 @@
 import {
+  DraftStore,
   RegistrationManager,
   TOOL_NAMES,
   type EmrAdapter,
@@ -132,7 +133,7 @@ function startManager(options?: {
   model: FakeModelContext;
   session: SessionSnapshot;
   privileges: ReadonlySet<string>;
-  drafts: Map<string, FollowupDraft>;
+  drafts: DraftStore;
   manager: RegistrationManager;
   apply: (next?: { session?: SessionSnapshot; privileges?: ReadonlySet<string> }) => void;
 } {
@@ -141,13 +142,17 @@ function startManager(options?: {
     session: options?.session ?? { authenticated: true, userId: 'user-1' },
     privileges: options?.privileges ?? BOTH_PRIVILEGES,
   };
-  const drafts = new Map<string, FollowupDraft>();
+  const drafts = new DraftStore({
+    userId: state.session.userId ?? 'user-1',
+    now: () => new Date(),
+    randomUUID: () => 'store-draft-1',
+  });
   const adapter = options?.adapter ?? stubAdapter();
   const runtime = createSessionCheckedRuntime({
     getAdapter: () => adapter,
     getSession: () => state.session,
     getPrivileges: () => state.privileges,
-    drafts,
+    getDraftStore: () => drafts,
   });
   const manager = new RegistrationManager({
     modelContext: model,
@@ -167,7 +172,7 @@ function startManager(options?: {
     }
     if (!state.session.authenticated || state.session.userId === null) {
       manager.logout();
-      drafts.clear();
+      drafts.logout();
       return;
     }
     manager.update({
@@ -211,7 +216,7 @@ describe('createSessionCheckedRuntime', () => {
       }),
     );
     const searchPatients = vi.fn(() => Promise.resolve([]));
-    const { model, apply } = startManager({
+    const { model, apply, drafts } = startManager({
       adapter: stubAdapter({ createFollowup, searchPatients }),
     });
 
@@ -224,6 +229,8 @@ describe('createSessionCheckedRuntime', () => {
     };
     const staged = await invoke(model.tool('stage_followup_task'), draft);
     expect(staged.ok).toBe(true);
+    expect(staged.data).toEqual({ draftId: 'store-draft-1' });
+    expect(drafts.peek('store-draft-1').title).toBe('Follow up potassium');
     expect(createFollowup).not.toHaveBeenCalled();
 
     const searchTool = model.tool('search_patients');

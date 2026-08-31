@@ -15,8 +15,9 @@ export function startupApp() {
   startWebmcpLifecycle();
 }
 
-// Root component
+// Root component — /emr-webmcp review workspace
 export const root = getAsyncLifecycle(() => import('./root.component'), options);
+export { ReviewQueue } from './review/review-queue.component';
 
 // Extensions
 

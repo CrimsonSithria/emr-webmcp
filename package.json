@@ -10,14 +10,16 @@
     "packages/core",
     "packages/adapters/*",
     "packages/workflows/*",
-    "tests/contract"
+    "tests/contract",
+    "tests/browser"
   ],
   "scripts": {
     "build": "yarn workspaces foreach --all --topological-dev run build",
     "lint": "yarn workspaces foreach --all --topological-dev run lint",
     "typecheck": "yarn workspaces foreach --all --topological-dev run typecheck",
     "test": "vitest run",
-    "test:contract": "vitest run --project contract"
+    "test:contract": "vitest run --project contract",
+    "test:browser": "yarn workspace @emr-webmcp/browser-tests test"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

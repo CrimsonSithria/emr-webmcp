@@ -1,8 +1,14 @@
-import { RegistrationManager, type EmrCapability, type FollowupDraft } from '@emr-webmcp/core';
+import { AdapterError, DraftStore, RegistrationManager, type EmrCapability } from '@emr-webmcp/core';
 import { getSessionStore, openmrsFetch } from '@openmrs/esm-framework';
 
-import { createO3OpenmrsAdapter, privilegesFromSession, wrapOpenmrsFetch } from '../openmrs/adapter-factory';
+import {
+  createO3OpenmrsAdapter,
+  privilegesFromSession,
+  wrapOpenmrsFetch,
+  USE_PRIVILEGE,
+} from '../openmrs/adapter-factory';
 import { createDefaultCapabilityProbe } from '../openmrs/capability-probe';
+import { bindReviewWorkspace, notifyReviewWorkspace } from '../review/review-workspace';
 import { getDocumentModelContext } from './document-model-context';
 import { createSessionCheckedRuntime, type SessionSnapshot } from './use-webmcp-registration';
 
@@ -34,9 +40,10 @@ function runWebmcpLifecycle(): () => void {
   const adapter = createO3OpenmrsAdapter({
     fetch,
     getActivePatientId: () => patientId,
+    canCreateFollowup: () => privileges.has(USE_PRIVILEGE),
   });
 
-  const drafts = new Map<string, FollowupDraft>();
+  let draftStore: DraftStore | null = null;
   let session: SessionSnapshot = { authenticated: false, userId: null };
   let privileges: ReadonlySet<string> = new Set();
   let capabilities: ReadonlySet<EmrCapability> = new Set();
@@ -48,7 +55,13 @@ function runWebmcpLifecycle(): () => void {
     getAdapter: () => adapter,
     getSession: () => session,
     getPrivileges: () => privileges,
-    drafts,
+    getDraftStore: () => {
+      if (draftStore === null) {
+        throw unauthorizedStore();
+      }
+      return draftStore;
+    },
+    onDraftsChanged: notifyReviewWorkspace,
   });
 
   const model = getDocumentModelContext();
@@ -71,13 +84,20 @@ function runWebmcpLifecycle(): () => void {
     }
     if (!session.authenticated || session.userId === null) {
       manager.logout();
-      drafts.clear();
+      dropStore();
       previousUserId = null;
       return;
     }
-    if (previousUserId !== null && previousUserId !== session.userId) {
+    if (draftStore === null) {
+      draftStore = new DraftStore({
+        userId: session.userId,
+        now: () => new Date(),
+        randomUUID: () => crypto.randomUUID(),
+      });
+    } else if (previousUserId !== null && previousUserId !== session.userId) {
       manager.userChange();
-      drafts.clear();
+      draftStore.userChange(session.userId);
+      notifyReviewWorkspace();
     }
     manager.update({
       userId: session.userId,
@@ -86,6 +106,15 @@ function runWebmcpLifecycle(): () => void {
       routeContext,
     });
     previousUserId = session.userId;
+  };
+
+  const dropStore = (): void => {
+    if (draftStore === null) {
+      return;
+    }
+    draftStore.logout();
+    draftStore = null;
+    notifyReviewWorkspace();
   };
 
   const refreshCapabilities = async (authenticated: boolean): Promise<void> => {
@@ -123,6 +152,13 @@ function runWebmcpLifecycle(): () => void {
     apply();
   };
 
+  const unbindReview = bindReviewWorkspace({
+    getStore: () => draftStore,
+    getAdapter: () => adapter,
+    getSession: () => session,
+    getPrivileges: () => privileges,
+  });
+
   readSession();
   const unsubscribe = getSessionStore().subscribe(readSession);
   window.addEventListener('single-spa:routing-event', onRoute);
@@ -134,8 +170,13 @@ function runWebmcpLifecycle(): () => void {
     window.removeEventListener('single-spa:routing-event', onRoute);
     window.removeEventListener('popstate', onRoute);
     manager?.unmount();
-    drafts.clear();
+    dropStore();
+    unbindReview();
   };
+}
+
+function unauthorizedStore(): AdapterError {
+  return new AdapterError('unauthorized', 'Not authorized to invoke this tool.', false);
 }
 
 function snapshotFromStore(state: SessionStoreState): SessionSnapshot {
