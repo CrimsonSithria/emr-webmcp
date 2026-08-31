@@ -388,13 +388,21 @@ function firstBundleId(data: unknown): string | undefined {
   if (data === null || typeof data !== 'object') {
     return undefined;
   }
-  const record = data as { entry?: Array<{ resource?: { id?: unknown } }>; id?: unknown };
-  const first = record.entry?.[0]?.resource?.id;
-  if (typeof first === 'string' && first !== '') {
-    return first;
+  const record = data as {
+    total?: unknown;
+    entry?: Array<{ resource?: { id?: unknown; resourceType?: unknown } }>;
+  };
+  if (record.total === 0) {
+    return undefined;
   }
-  if (typeof record.id === 'string' && record.id !== '') {
-    return record.id;
+  const resource = record.entry?.[0]?.resource;
+  if (
+    resource !== undefined &&
+    (resource.resourceType === 'Observation' || resource.resourceType === 'CarePlan') &&
+    typeof resource.id === 'string' &&
+    resource.id !== ''
+  ) {
+    return resource.id;
   }
   return undefined;
 }
