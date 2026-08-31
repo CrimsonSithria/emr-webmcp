@@ -58,6 +58,66 @@ describe('HTTP identifier search', () => {
       patientId: '',
     });
   });
+
+  it('treats FHIR identifier search HTTP 400 as a miss', async () => {
+    const client = createHttpAdminClient({
+      baseUrl: 'http://openmrs.test',
+      username: 'admin',
+      password: 'secret',
+      fetchImpl: () => Promise.resolve(new Response('', { status: 400 })),
+    });
+
+    await expect(client.findByIdempotencyKey('emr-webmcp:run:observation:0')).resolves.toBeUndefined();
+  });
+});
+
+describe('import Patient via idgen', () => {
+  it('mints an OpenMRS ID and posts the Patient from a transaction bundle', async () => {
+    const fetchImpl: typeof fetch = (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (url.includes('patientidentifiertype')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ results: [{ display: 'OpenMRS ID', uuid: 'type-1' }] })),
+        );
+      }
+      if (url.includes('identifiersource') && method === 'GET') {
+        return Promise.resolve(new Response(JSON.stringify({ results: [{ uuid: 'src-1' }] })));
+      }
+      if (url.includes('/location')) {
+        return Promise.resolve(new Response(JSON.stringify({ results: [{ uuid: 'loc-1' }] })));
+      }
+      if (url.includes('/identifier') && method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify({ identifier: '10000A' }), { status: 201 }));
+      }
+      if (url.endsWith('/ws/fhir2/R4/Patient') && method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as {
+          identifier?: Array<{ value?: string; type?: { coding?: Array<{ code?: string }> } }>;
+        };
+        expect(body.identifier?.[0]?.value).toBe('10000A');
+        expect(body.identifier?.[0]?.type?.coding?.[0]?.code).toBe('type-1');
+        return Promise.resolve(
+          new Response(JSON.stringify({ resourceType: 'Patient', id: 'created-1' }), { status: 201 }),
+        );
+      }
+      throw new Error(`unexpected ${method} ${url}`);
+    };
+
+    const client = createHttpAdminClient({
+      baseUrl: 'http://openmrs.test',
+      username: 'admin',
+      password: 'secret',
+      fetchImpl,
+    });
+
+    await expect(
+      client.importDocument({
+        resourceType: 'Bundle',
+        type: 'transaction',
+        entry: [{ resource: { resourceType: 'Patient', gender: 'male' } }],
+      }),
+    ).resolves.toBe('imported');
+  });
 });
 
 function sampleManifest(): SimulationManifest {

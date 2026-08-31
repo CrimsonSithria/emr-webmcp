@@ -91,6 +91,18 @@ describe('k6 adapter paths', () => {
     expect(mixed.some((url) => url.includes('patient='))).toBe(true);
   });
 
+  it('overrides the live appointments path without changing the product table', async () => {
+    (globalThis as { __ENV?: Record<string, string> }).__ENV = {
+      VUS: '1',
+      OPENMRS_APPOINTMENTS_PATH: '/ws/rest/v1/appointments',
+    };
+    const { OPENMRS_PATHS, mixedClinicReads } = await loadCommon();
+    expect(OPENMRS_PATHS.appointments).toBe('/ws/rest/v1/appointment');
+    const mixed = mixedClinicReads('http://127.0.0.1:8080');
+    expect(mixed.some((url) => url.includes('/ws/rest/v1/appointments?'))).toBe(true);
+    expect(mixed.some((url) => url.includes('/ws/rest/v1/appointment?'))).toBe(false);
+  });
+
   it('keeps script checks at HTTP 200 and uses the shared path table', () => {
     const mixed = readFileSync(join(k6Dir, 'mixed-clinic.js'), 'utf8');
     const reads = readFileSync(join(k6Dir, 'read-tools.js'), 'utf8');

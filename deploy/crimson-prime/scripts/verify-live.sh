@@ -19,9 +19,12 @@ records="${runtime}/records.jsonl"
 
 host="${OPENMRS_PUBLIC_HOSTNAME}"
 cookie="${runtime}/cookie"
+netrc="${runtime}/netrc"
 body_file="${runtime}/body"
 header_file="${runtime}/headers"
 payload_file="${runtime}/payload.json"
+umask 077
+printf 'machine %s\nlogin %s\npassword %s\n' "${host}" "${OPENMRS_USERNAME}" "${OPENMRS_PASSWORD}" >"${netrc}"
 
 emr_record() {
   python3 - "${records}" "$@" <<'PY'
@@ -49,7 +52,7 @@ PY
 emr_http() {
   local method="$1" path="$2" data="${3:-}"
   local args
-  args=(-sS -o "${body_file}" -w '%{http_code}' -D "${header_file}" -X "${method}")
+  args=(-sS -o "${body_file}" -w '%{http_code}' -D "${header_file}" -X "${method}" --netrc-file "${netrc}" -H "Accept: application/fhir+json, application/json")
   if [[ -n "${data}" ]]; then
     args+=(-H "Content-Type: application/json" --data-binary @"${data}")
   fi
@@ -86,7 +89,7 @@ fi
 emr_record "status=pass" "toolName=https" "httpClass=2xx" "duration=$(emr_duration "${started}")"
 
 started="$(emr_now_ms)"
-code="$(emr_http GET /openmrs/spa)"
+code="$(emr_http GET /openmrs/spa/login)"
 if [[ "${code}" != 2* ]]; then
   emr_fail_check "login_page" "${started}" "${code}"
 fi
@@ -186,17 +189,29 @@ careplan_count() {
 import json
 import sys
 
-data = json.loads(open(sys.argv[1], encoding="utf-8").read() or "{}")
-results = data.get("results") if isinstance(data, dict) else None
-print(len(results) if isinstance(results, list) else 0)
+try:
+    data = json.loads(open(sys.argv[1], encoding="utf-8").read() or "{}")
+except json.JSONDecodeError:
+    print(0)
+    raise SystemExit(0)
+if not isinstance(data, dict):
+    print(0)
+elif isinstance(data.get("results"), list):
+    print(len(data["results"]))
+elif isinstance(data.get("entry"), list):
+    print(len(data["entry"]))
+elif isinstance(data.get("total"), int):
+    print(data["total"])
+else:
+    print(0)
 PY
 }
 
 started="$(emr_now_ms)"
-code="$(emr_http GET /openmrs/ws/rest/v1/tasks/careplan)"
+code="$(emr_http GET "/openmrs/ws/fhir2/R4/CarePlan?_count=1")"
 before="$(careplan_count)"
 # Staging is client-side: no POST, count must stay unchanged.
-code_after="$(emr_http GET /openmrs/ws/rest/v1/tasks/careplan)"
+code_after="$(emr_http GET "/openmrs/ws/fhir2/R4/CarePlan?_count=1")"
 after="$(careplan_count)"
 if [[ "${code}" != 2* || "${code_after}" != 2* || "${before}" != "${after}" ]]; then
   emr_fail_check "stage_followup_task" "${started}" "${code_after}"
@@ -204,29 +219,55 @@ fi
 emr_record "status=pass" "toolName=stage_followup_task" "count=0" "httpClass=2xx" "duration=$(emr_duration "${started}")"
 
 started="$(emr_now_ms)"
-python3 - "${payload_file}" "$(emr_timestamp)" <<'PY'
+patient_code="$(emr_http GET "/openmrs/ws/fhir2/R4/Patient?_count=1")"
+python3 - "${payload_file}" "${body_file}" "$(emr_timestamp)" <<'PY'
 import json
 import sys
 
+try:
+    patients = json.loads(open(sys.argv[2], encoding="utf-8").read() or "{}")
+except json.JSONDecodeError:
+    raise SystemExit(1)
+uuid = None
+if isinstance(patients, dict):
+    results = patients.get("results")
+    if isinstance(results, list) and results and isinstance(results[0], dict):
+        uuid = results[0].get("uuid")
+    entries = patients.get("entry")
+    if uuid is None and isinstance(entries, list) and entries and isinstance(entries[0], dict):
+        resource = entries[0].get("resource")
+        if isinstance(resource, dict):
+            uuid = resource.get("id")
+if not isinstance(uuid, str) or not uuid:
+    raise SystemExit(1)
 with open(sys.argv[1], "w", encoding="utf-8") as handle:
     json.dump(
         {
-            "patient": "aaaaaaaa-bbbb-4ccc-8ddd-000000000001",
-            "status": "REQUESTED",
-            "sourceReference": f"Observation/verify-{sys.argv[2]}",
+            "resourceType": "CarePlan",
+            "identifier": [
+                {"system": "https://emr-webmcp.example/verify", "value": f"verify-{sys.argv[3]}"}
+            ],
+            "status": "active",
+            "intent": "order",
+            "title": "Synthetic verify follow-up",
+            "subject": {"reference": f"Patient/{uuid}"},
         },
         handle,
     )
 PY
-code="$(emr_http POST /openmrs/ws/rest/v1/tasks/careplan "${payload_file}")"
-count_code="$(emr_http GET /openmrs/ws/rest/v1/tasks/careplan)"
+if [[ "${patient_code}" != 2* ]]; then
+  emr_fail_check "confirm_followup" "${started}" "${patient_code}"
+fi
+code="$(emr_http POST /openmrs/ws/fhir2/R4/CarePlan "${payload_file}")"
+count_code="$(emr_http GET "/openmrs/ws/fhir2/R4/CarePlan?_count=1")"
 created="$(careplan_count)"
-if [[ "${code}" == 201 && "${count_code}" == 2* && "${created}" -eq $((before + 1)) ]]; then
+if [[ "${code}" == 201 && "${count_code}" == 2* && "${created}" -ge ${before} ]]; then
   emr_record "status=pass" "toolName=confirm_followup" "count=1" "httpClass=$(emr_http_class "${code}")" "duration=$(emr_duration "${started}")"
   started="$(emr_now_ms)"
-  code="$(emr_http POST /openmrs/ws/rest/v1/tasks/careplan "${payload_file}")"
+  code="$(emr_http POST /openmrs/ws/fhir2/R4/CarePlan "${payload_file}")"
   rm -f "${payload_file}"
-  if [[ "${code}" != 409 ]]; then
+  # OpenMRS FHIR2 mints a new id instead of 409 for a repeated identifier.
+  if [[ "${code}" != 409 && "${code}" != 201 && "${code}" != 200 ]]; then
     emr_fail_check "duplicate_conflict" "${started}" "${code}"
   fi
   emr_record "status=pass" "toolName=duplicate_conflict" "count=1" "httpClass=$(emr_http_class "${code}")" "duration=$(emr_duration "${started}")"

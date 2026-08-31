@@ -58,11 +58,19 @@ export function thresholdsFor(vus) {
 }
 
 export function authHeaders() {
+  const headers = {};
   const cookie = readEnv('OPENMRS_SESSION', '');
-  if (cookie === '') {
+  const authorization = readEnv('OPENMRS_AUTH', '');
+  if (cookie !== '') {
+    headers.Cookie = cookie;
+  }
+  if (authorization !== '') {
+    headers.Authorization = authorization;
+  }
+  if (Object.keys(headers).length === 0) {
     return {};
   }
-  return { headers: { Cookie: cookie } };
+  return { headers };
 }
 
 export function boundedReadParams() {
@@ -97,25 +105,34 @@ export function openmrsUrl(base, resourcePath, query) {
   return `${origin}/openmrs${withQuery(resourcePath, query)}`;
 }
 
+function appointmentsPath() {
+  return readEnv('OPENMRS_APPOINTMENTS_PATH', OPENMRS_PATHS.appointments);
+}
+
+function loadPatientId() {
+  return readEnv('OPENMRS_LOAD_PATIENT', SYNTHETIC_LOAD_PATIENT);
+}
+
 export function mixedClinicReads(base) {
+  const patient = loadPatientId();
   return [
     openmrsUrl(base, OPENMRS_PATHS.patients, { q: '', limit: '20', v: 'default' }),
-    openmrsUrl(base, OPENMRS_PATHS.appointments, { fromDate: LOAD_FROM_DATE, toDate: LOAD_TO_DATE }),
+    openmrsUrl(base, appointmentsPath(), { fromDate: LOAD_FROM_DATE, toDate: LOAD_TO_DATE }),
     openmrsUrl(base, OPENMRS_PATHS.observations, {
-      patient: SYNTHETIC_LOAD_PATIENT,
+      patient,
       category: 'laboratory',
       _count: '20',
     }),
-    openmrsUrl(base, OPENMRS_PATHS.carePlans, { patient: SYNTHETIC_LOAD_PATIENT }),
+    openmrsUrl(base, OPENMRS_PATHS.carePlans, { patient }),
   ];
 }
 
 export function readToolReads(base) {
   return [
     openmrsUrl(base, OPENMRS_PATHS.patients, { q: '', limit: '20', v: 'default' }),
-    openmrsUrl(base, OPENMRS_PATHS.appointments, { fromDate: LOAD_FROM_DATE, toDate: LOAD_TO_DATE }),
+    openmrsUrl(base, appointmentsPath(), { fromDate: LOAD_FROM_DATE, toDate: LOAD_TO_DATE }),
     openmrsUrl(base, OPENMRS_PATHS.observations, {
-      patient: SYNTHETIC_LOAD_PATIENT,
+      patient: loadPatientId(),
       category: 'laboratory',
       _count: '20',
     }),

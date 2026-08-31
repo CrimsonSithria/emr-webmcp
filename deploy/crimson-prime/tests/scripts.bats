@@ -120,7 +120,7 @@ while [[ $# -gt 0 ]]; do
     -w|--write-out) write_fmt="$2"; shift 2 ;;
     -D|--dump-header) dump_headers="$2"; shift 2 ;;
     -X|--request) method="$2"; shift 2 ;;
-    -H|--header|-u|--user|-d|--data|--data-binary|--data-raw) shift 2 ;;
+    -H|--header|-u|--user|-d|--data|--data-binary|--data-raw|--netrc-file) shift 2 ;;
     -s|-S|-f|-L|-k|-c|-b|--silent|--show-error|--fail|--location) shift ;;
     --data-binary|--data) shift 2 ;;
     -*) shift ;;
@@ -144,11 +144,15 @@ elif [[ "${url}" == *'/ws/rest/v1/session'* ]]; then
     body='{"authenticated":true,"user":{"uuid":"synthetic-user"}}'
     headers="HTTP/1.1 200 OK\r\nSet-Cookie: JSESSIONID=secret-cookie-value; Path=/\r\n"
   fi
+elif [[ "${url}" == *'/ws/rest/v1/patient'* ]]; then
+  body='{"results":[{"uuid":"aaaaaaaa-bbbb-4ccc-8ddd-000000000001"}]}'
+elif [[ "${url}" == *'/ws/fhir2/R4/Patient'* ]]; then
+  body='{"resourceType":"Bundle","type":"searchset","entry":[{"resource":{"resourceType":"Patient","id":"aaaaaaaa-bbbb-4ccc-8ddd-000000000001"}}]}'
 elif [[ "${url}" == *'/ws/fhir2/R4/metadata'* ]]; then
   body='{"resourceType":"CapabilityStatement","status":"active"}'
 elif [[ "${url}" == *importmap* ]]; then
   body='{"imports":{"@emr-webmcp/openmrs-esm":"/openmrs/spa/emr-webmcp.js","@openmrs/esm-patient-task-list-app":"/openmrs/spa/tasks.js"}}'
-elif [[ "${url}" == *'/ws/rest/v1/tasks/careplan'* ]]; then
+elif [[ "${url}" == *'/ws/rest/v1/tasks/careplan'* || "${url}" == *'/ws/fhir2/R4/CarePlan'* ]]; then
   posts=0
   if [[ -f "${count_file}" ]]; then
     posts="$(cat "${count_file}")"

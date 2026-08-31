@@ -69,6 +69,7 @@ export type OpenMrsAdminClient = {
   createFollowup(input: CreateFollowupInput): Promise<SeededRecord>;
   createEdgeCase(input: CreateEdgeInput): Promise<SeededRecord>;
   importDocument(document: unknown): Promise<'imported' | 'rejected'>;
+  listPatientIds(): Promise<string[]>;
 };
 
 export type MemoryAdminClient = OpenMrsAdminClient & {
@@ -168,6 +169,9 @@ export function createMemoryAdminClient(): MemoryAdminClient {
     importDocument() {
       return Promise.resolve('imported');
     },
+    listPatientIds() {
+      return Promise.resolve([]);
+    },
   };
 }
 
@@ -236,6 +240,10 @@ export function createHttpAdminClient(options: {
     if (response.status === 404) {
       return { status: 404, data: undefined };
     }
+    // OpenMRS FHIR2 identifier searches return 400 for unknown systems.
+    if (response.status === 400 && method === 'GET') {
+      return { status: 400, data: undefined };
+    }
     if (response.status < 200 || response.status >= 300) {
       await response.arrayBuffer().catch(() => undefined);
       throw adminErrorFromStatus(response.status);
@@ -247,6 +255,15 @@ export function createHttpAdminClient(options: {
   const remember = (record: SeededRecord): SeededRecord => {
     store.set(record.idempotencyKey, record);
     return record;
+  };
+
+  let importContext: ImportContext | undefined;
+  const loadImportContextCached = async (): Promise<ImportContext> => {
+    if (importContext !== undefined) {
+      return importContext;
+    }
+    importContext = await loadImportContext(request);
+    return importContext;
   };
 
   return {
@@ -321,8 +338,10 @@ export function createHttpAdminClient(options: {
             ],
           },
         ],
-        code: { coding: [{ code: 'synth-lab' }] },
+        code: { coding: [{ system: 'http://loinc.org', code: '718-7' }] },
         subject: { reference: `Patient/${input.patientId}` },
+        effectiveDateTime: '2026-08-31T12:00:00.000Z',
+        valueQuantity: { value: 13.2, unit: 'g/dL' },
         interpretation: [{ coding: [{ code: input.interpretation }] }],
       });
       return remember({
@@ -333,7 +352,7 @@ export function createHttpAdminClient(options: {
       });
     },
     async createFollowup(input) {
-      await request('POST', '/ws/rest/v1/tasks/careplan', {
+      await request('POST', '/ws/fhir2/R4/CarePlan', {
         resourceType: 'CarePlan',
         id: input.plannedResourceId,
         identifier: [{ system: WORKLOAD_IDEMPOTENCY_SYSTEM, value: input.idempotencyKey }],
@@ -351,7 +370,7 @@ export function createHttpAdminClient(options: {
       });
     },
     async createEdgeCase(input) {
-      await request('POST', '/ws/rest/v1/tasks/careplan', {
+      await request('POST', '/ws/fhir2/R4/CarePlan', {
         resourceType: 'CarePlan',
         id: input.plannedResourceId,
         identifier: [{ system: WORKLOAD_IDEMPOTENCY_SYSTEM, value: input.idempotencyKey }],
@@ -372,7 +391,21 @@ export function createHttpAdminClient(options: {
     },
     async importDocument(document) {
       try {
-        await request('POST', '/ws/fhir2/R4', document);
+        const patient = extractPatientResource(document);
+        if (patient === undefined) {
+          return 'rejected';
+        }
+        const context = await loadImportContextCached();
+        const generated = await request(
+          'POST',
+          `/ws/rest/v1/idgen/identifiersource/${context.sourceUuid}/identifier`,
+          { comment: 'emr-webmcp-import' },
+        );
+        const identifier = generatedIdentifier(generated.data);
+        if (identifier === undefined) {
+          return 'rejected';
+        }
+        await request('POST', '/ws/fhir2/R4/Patient', withOpenMrsIdentifier(patient, identifier, context));
         return 'imported';
       } catch (error) {
         if (error instanceof OpenMrsAdminError) {
@@ -381,7 +414,166 @@ export function createHttpAdminClient(options: {
         throw error;
       }
     },
+    async listPatientIds() {
+      const ids: string[] = [];
+      let path: string | undefined = '/ws/fhir2/R4/Patient?_count=50';
+      for (let page = 0; page < 20 && path !== undefined; page += 1) {
+        const result = await request('GET', path);
+        ids.push(...patientIdsFromBundle(result.data));
+        path = nextSearchPath(result.data, options.baseUrl);
+      }
+      return [...new Set(ids)].sort();
+    },
   };
+}
+
+type ImportContext = {
+  sourceUuid: string;
+  typeUuid: string;
+  locationUuid: string;
+};
+
+type AdminRequest = (
+  method: string,
+  resourcePath: string,
+  body?: unknown,
+) => Promise<{ status: number; data: unknown }>;
+
+function asResultRows(data: unknown): Array<Record<string, unknown>> {
+  if (data === null || typeof data !== 'object') {
+    return [];
+  }
+  const results = (data as { results?: unknown }).results;
+  if (!Array.isArray(results)) {
+    return [];
+  }
+  return results.filter((row): row is Record<string, unknown> => row !== null && typeof row === 'object');
+}
+
+function rowUuid(row: Record<string, unknown>): string | undefined {
+  return typeof row.uuid === 'string' && row.uuid !== '' ? row.uuid : undefined;
+}
+
+async function loadImportContext(request: AdminRequest): Promise<ImportContext> {
+  const types = asResultRows((await request('GET', '/ws/rest/v1/patientidentifiertype')).data);
+  const openMrsId = types.find((row) => row.display === 'OpenMRS ID' || row.name === 'OpenMRS ID');
+  const typeUuid = openMrsId !== undefined ? rowUuid(openMrsId) : undefined;
+  const sources = asResultRows((await request('GET', '/ws/rest/v1/idgen/identifiersource')).data);
+  const sourceUuid = sources.length > 0 ? rowUuid(sources[0]) : undefined;
+  const locations = asResultRows((await request('GET', '/ws/rest/v1/location?limit=1')).data);
+  const locationUuid = locations.length > 0 ? rowUuid(locations[0]) : undefined;
+  if (typeUuid === undefined || sourceUuid === undefined || locationUuid === undefined) {
+    throw new OpenMrsAdminError(400, 'invalid-input');
+  }
+  return { sourceUuid, typeUuid, locationUuid };
+}
+
+function generatedIdentifier(data: unknown): string | undefined {
+  if (data === null || typeof data !== 'object') {
+    return undefined;
+  }
+  const identifier = (data as { identifier?: unknown }).identifier;
+  return typeof identifier === 'string' && identifier !== '' ? identifier : undefined;
+}
+
+function extractPatientResource(document: unknown): Record<string, unknown> | undefined {
+  if (document === null || typeof document !== 'object') {
+    return undefined;
+  }
+  const record = document as { resourceType?: unknown; entry?: unknown };
+  if (record.resourceType === 'Patient') {
+    return { ...record };
+  }
+  if (record.resourceType !== 'Bundle' || !Array.isArray(record.entry)) {
+    return undefined;
+  }
+  for (const entry of record.entry) {
+    if (entry === null || typeof entry !== 'object') {
+      continue;
+    }
+    const resource = (entry as { resource?: unknown }).resource;
+    if (resource !== null && typeof resource === 'object' && (resource as { resourceType?: unknown }).resourceType === 'Patient') {
+      return { ...(resource as Record<string, unknown>) };
+    }
+  }
+  return undefined;
+}
+
+function withOpenMrsIdentifier(
+  patient: Record<string, unknown>,
+  identifier: string,
+  context: ImportContext,
+): Record<string, unknown> {
+  return {
+    ...patient,
+    identifier: [
+      {
+        use: 'official',
+        type: { coding: [{ code: context.typeUuid }], text: 'OpenMRS ID' },
+        extension: [
+          {
+            url: 'http://fhir.openmrs.org/ext/patient/identifier#location',
+            valueReference: { reference: `Location/${context.locationUuid}`, type: 'Location' },
+          },
+        ],
+        value: identifier,
+      },
+    ],
+  };
+}
+
+function patientIdsFromBundle(data: unknown): string[] {
+  if (data === null || typeof data !== 'object') {
+    return [];
+  }
+  const entry = (data as { entry?: unknown }).entry;
+  if (!Array.isArray(entry)) {
+    return [];
+  }
+  const ids: string[] = [];
+  for (const item of entry) {
+    if (item === null || typeof item !== 'object') {
+      continue;
+    }
+    const resource = (item as { resource?: { resourceType?: unknown; id?: unknown } }).resource;
+    if (resource?.resourceType === 'Patient' && typeof resource.id === 'string' && resource.id !== '') {
+      ids.push(resource.id);
+    }
+  }
+  return ids;
+}
+
+function nextSearchPath(data: unknown, baseUrl: string): string | undefined {
+  if (data === null || typeof data !== 'object') {
+    return undefined;
+  }
+  const links = (data as { link?: unknown }).link;
+  if (!Array.isArray(links)) {
+    return undefined;
+  }
+  for (const link of links) {
+    if (link === null || typeof link !== 'object') {
+      continue;
+    }
+    const rel = (link as { relation?: unknown; url?: unknown }).relation;
+    const url = (link as { relation?: unknown; url?: unknown }).url;
+    if (rel !== 'next' || typeof url !== 'string' || url === '') {
+      continue;
+    }
+    if (url.startsWith('/')) {
+      return url;
+    }
+    if (url.startsWith(baseUrl)) {
+      return url.slice(baseUrl.length);
+    }
+    try {
+      const parsed = new URL(url);
+      return `${parsed.pathname}${parsed.search}`;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 function firstBundleId(data: unknown): string | undefined {

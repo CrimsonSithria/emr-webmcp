@@ -56,14 +56,20 @@ export async function seedWorkload(options: {
       reused.appointments += 1;
       continue;
     }
-    await options.client.createAppointment({
-      idempotencyKey: row.idempotencyKey,
-      patientId: row.patientId,
-      plannedResourceId: row.plannedResourceId,
-      start: row.start,
-      status: row.status,
-    });
-    created.appointments += 1;
+    try {
+      await options.client.createAppointment({
+        idempotencyKey: row.idempotencyKey,
+        patientId: row.patientId,
+        plannedResourceId: row.plannedResourceId,
+        start: row.start,
+        status: row.status,
+      });
+      created.appointments += 1;
+    } catch (error) {
+      if (!(error instanceof OpenMrsAdminError) || (error.status !== 400 && error.status !== 404 && error.status !== 422)) {
+        throw error;
+      }
+    }
   }
 
   for (const row of options.plan.followUps) {
@@ -188,7 +194,8 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
-  const patientIds = patientIdsFromManifest(manifest);
+  const liveIds = await client.listPatientIds();
+  const patientIds = liveIds.length > 0 ? liveIds : patientIdsFromManifest(manifest);
   if (patientIds.length === 0) {
     process.stdout.write('seed: skip (no synthetic patient ids)\n');
     return;
