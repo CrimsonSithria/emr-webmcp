@@ -41,6 +41,7 @@ RUN apk update && \
 
 RUN rm -rf /usr/share/nginx/html/*
 
+COPY distribution/openmrs/nginx.conf /etc/nginx/nginx.conf
 COPY --from=assemble /app/spa /usr/share/nginx/html
 
 # Runtime placeholder substitution matches the official O3 frontend image.
