@@ -40,15 +40,15 @@ emr_write_image_manifest "${dest}/image-manifest.json"
 dump_err="${dest}/.dump.err"
 # Password expands inside the container, not on the host command line.
 # shellcheck disable=SC2016
-if emr_compose exec -T db sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --all-databases' >"${dest}/mariadb.sql" 2>"${dump_err}"; then
-  rm -f "${dump_err}"
-elif emr_db_absent_error "${dump_err}"; then
-  rm -f "${dest}/mariadb.sql" "${dump_err}"
-  : >"${dest}/db-dump.skipped"
-else
+if ! emr_compose exec -T db sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --all-databases' >"${dest}/mariadb.sql" 2>"${dump_err}"; then
   rm -rf "${dest}"
   emr_die "backup failed"
 fi
+if [[ ! -s "${dest}/mariadb.sql" ]]; then
+  rm -rf "${dest}"
+  emr_die "backup failed"
+fi
+rm -f "${dump_err}"
 
 if [[ -f "${backup_root}/CURRENT" ]]; then
   cp "${backup_root}/CURRENT" "${backup_root}/PREVIOUS"

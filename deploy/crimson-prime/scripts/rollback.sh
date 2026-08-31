@@ -22,5 +22,10 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   exit 0
 fi
 
+while IFS=$'\t' read -r image_id ref; do
+  [[ -n "${image_id}" && -n "${ref}" ]] || continue
+  docker tag "${image_id}" "${ref}"
+done < <(emr_apply_image_manifest "${dest}/image-manifest.json")
+
 emr_compose_file_at "${dest}/compose.yml" up -d --no-build
 emr_wait_healthy

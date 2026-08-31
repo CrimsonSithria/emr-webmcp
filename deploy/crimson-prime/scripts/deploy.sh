@@ -12,7 +12,7 @@ SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 emr_load_env
 
-emr_compose pull
+emr_compose pull --ignore-buildable db backend gateway
 emr_compose build frontend
 emr_compose up -d --remove-orphans
 emr_wait_healthy

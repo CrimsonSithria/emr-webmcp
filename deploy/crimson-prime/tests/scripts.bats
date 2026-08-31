@@ -48,6 +48,9 @@ fi
 if [[ "${1:-}" == "info" ]]; then
   exit "${STUB_DOCKER_INFO_EXIT:-0}"
 fi
+if [[ "${1:-}" == "tag" ]]; then
+  exit 0
+fi
 if [[ "${1:-}" != "compose" ]]; then
   exit 0
 fi
@@ -58,7 +61,11 @@ if [[ "${joined}" == *version* ]]; then
   exit 0
 fi
 if [[ "${joined}" == *mysqldump* ]]; then
-  exit "${STUB_MYSQLDUMP_EXIT:-0}"
+  if [[ "${STUB_MYSQLDUMP_EXIT:-0}" != "0" ]]; then
+    exit "${STUB_MYSQLDUMP_EXIT}"
+  fi
+  printf -- '-- MariaDB dump stub\n'
+  exit 0
 fi
 if [[ "${joined}" == *mysql* && "${joined}" != *mysqldump* ]]; then
   printf 'restore-db\n' >>"${dir}/restore.called"
@@ -69,7 +76,7 @@ if [[ "${joined}" == *config* ]]; then
 fi
 if [[ "${joined}" == *images* ]]; then
   cat <<'JSON'
-[{"Service":"db","Repository":"mariadb","Tag":"10.11.7","ID":"sha256:olddb"}]
+[{"Service":"db","Repository":"mariadb","Tag":"10.11.7","ID":"sha256:olddb"},{"Service":"backend","Repository":"openmrs/openmrs-reference-application-3-backend","Tag":"qa","ID":"sha256:oldbackend"},{"Service":"frontend","Repository":"emr-webmcp/openmrs-frontend","Tag":"local","ID":"sha256:previous-frontend"},{"Service":"gateway","Repository":"openmrs/openmrs-reference-application-3-gateway","Tag":"qa","ID":"sha256:oldgateway"}]
 JSON
   exit 0
 fi
@@ -120,7 +127,9 @@ count_file="${EMR_WEBMCP_STUB_DIR:-/tmp}/careplan.posts"
 body=""
 code="200"
 headers="HTTP/1.1 200 OK\r\n"
-if [[ "${url}" == *'/openmrs/spa'* && "${url}" != *importmap* ]]; then
+if [[ "${url}" == *routes.registry* || "${url}" == *routes.registry.json* ]]; then
+  body='{"@emr-webmcp/openmrs-esm":{"pages":[{"route":"emr-webmcp"}]}}'
+elif [[ "${url}" == *'/openmrs/spa'* && "${url}" != *importmap* && "${url}" != *routes* ]]; then
   body='<!doctype html><title>Login</title>'
 elif [[ "${url}" == *'/ws/rest/v1/session'* ]]; then
   if [[ "${method}" == "DELETE" ]]; then
@@ -289,8 +298,9 @@ EOF
   run "${SCRIPTS_DIR}/deploy.sh"
   [ "${status}" -ne 0 ]
   if [[ -f "${EMR_WEBMCP_STUB_LOG}" ]]; then
-    ! grep -E '(^| )up( |$)' "${EMR_WEBMCP_STUB_LOG}"
+    ! grep -- '--remove-orphans' "${EMR_WEBMCP_STUB_LOG}"
   fi
+  ! find "${EMR_WEBMCP_BACKUP_DIR}" -name 'db-dump.skipped' | grep -q .
   _assert_redacted "${output}"
 }
 
@@ -314,7 +324,7 @@ EOF
   local previous="${EMR_WEBMCP_BACKUP_DIR}/20260831T010000Z"
   mkdir -p "${previous}"
   cat >"${previous}/image-manifest.json" <<'EOF'
-{"db":"mariadb:10.11.7@sha256:previous","backend":"openmrs/openmrs-reference-application-3-backend:qa@sha256:previous","frontend":"emr-webmcp/openmrs-frontend:local","gateway":"openmrs/openmrs-reference-application-3-gateway:qa@sha256:previous"}
+{"db":{"ref":"mariadb:10.11.7@sha256:previous","id":"sha256:olddb"},"backend":{"ref":"openmrs/openmrs-reference-application-3-backend:qa@sha256:previous","id":"sha256:oldbackend"},"frontend":{"ref":"emr-webmcp/openmrs-frontend:local","id":"sha256:previous-frontend"},"gateway":{"ref":"openmrs/openmrs-reference-application-3-gateway:qa@sha256:previous","id":"sha256:oldgateway"}}
 EOF
   cp "${EMR_WEBMCP_ROOT}/deploy/crimson-prime/compose.yml" "${previous}/compose.yml"
   printf '20260831T010000Z\n' >"${EMR_WEBMCP_BACKUP_DIR}/PREVIOUS"
@@ -322,6 +332,7 @@ EOF
   [ "${status}" -eq 0 ]
   [ ! -f "${EMR_WEBMCP_STUB_DIR}/restore.called" ]
   grep -E '(^| )up( |$)' "${EMR_WEBMCP_STUB_LOG}"
+  grep -E '(^| )tag sha256:previous-frontend emr-webmcp/openmrs-frontend:local( |$)' "${EMR_WEBMCP_STUB_LOG}"
   _assert_redacted "${output}"
 }
 
@@ -398,6 +409,11 @@ for rec in data:
         needles[name] = True
         if rec.get("status") != "pass":
             raise SystemExit(f"{name} did not pass")
+        if name == "webmcp_discovery":
+            if rec.get("count") == 12:
+                raise SystemExit("discovery count must be probed, not hardcoded 12")
+            if not isinstance(rec.get("count"), int) or rec["count"] < 1:
+                raise SystemExit("discovery count must be a positive probed value")
 missing = [name for name, seen in needles.items() if not seen]
 if missing:
     raise SystemExit(f"missing checks: {missing}")
@@ -413,6 +429,44 @@ PY
   if [[ -n "$(find "${TEST_HOME}" -type f \( -name '*cookie*' -o -name '*jar' -o -name '*.sql' \) -print)" ]]; then
     return 1
   fi
+}
+
+@test "deploy pulls published images only and skips the local frontend" {
+  export STUB_HEALTH="healthy"
+  export STUB_MYSQLDUMP_EXIT="0"
+  run "${SCRIPTS_DIR}/deploy.sh"
+  [ "${status}" -eq 0 ]
+  grep -E 'pull --ignore-buildable( db backend gateway)?|pull db backend gateway' "${EMR_WEBMCP_STUB_LOG}"
+  ! grep -E '[[:space:]]pull[[:space:]]*$' "${EMR_WEBMCP_STUB_LOG}"
+  ! grep -E 'pull.*frontend' "${EMR_WEBMCP_STUB_LOG}"
+  _assert_redacted "${output}"
+}
+
+@test "backup fails when the database dump is absent and does not skip" {
+  export STUB_MYSQLDUMP_EXIT="1"
+  run "${SCRIPTS_DIR}/backup.sh"
+  [ "${status}" -ne 0 ]
+  ! find "${EMR_WEBMCP_BACKUP_DIR}" -name 'db-dump.skipped' | grep -q .
+  ! find "${EMR_WEBMCP_BACKUP_DIR}" -name 'mariadb.sql' | grep -q .
+  _assert_redacted "${output}"
+}
+
+@test "verify-live confirm is idempotent when the first POST already conflicts" {
+  printf '1' >"${EMR_WEBMCP_STUB_DIR}/careplan.posts"
+  run "${SCRIPTS_DIR}/verify-live.sh"
+  [ "${status}" -eq 0 ]
+  python3 - "${output}" <<'PY'
+import json, sys
+data = json.loads(sys.argv[1])
+by_name = {rec.get("toolName"): rec for rec in data}
+if by_name["confirm_followup"]["status"] != "pass":
+    raise SystemExit("confirm_followup must pass on rerun 409")
+if by_name["duplicate_conflict"]["status"] != "pass":
+    raise SystemExit("duplicate_conflict must pass on rerun 409")
+if by_name["duplicate_conflict"]["httpClass"] != "4xx":
+    raise SystemExit("duplicate_conflict must record 4xx")
+PY
+  _assert_redacted "${output}"
 }
 
 @test "backup writes a timestamped manifest under the override directory not the git worktree" {

@@ -141,7 +141,45 @@ fi
 emr_record "status=pass" "toolName=import_map" "moduleName=@emr-webmcp/openmrs-esm" "count=${module_count}" "httpClass=$(emr_http_class "${code}")" "duration=$(emr_duration "${started}")"
 
 started="$(emr_now_ms)"
-emr_record "status=pass" "toolName=webmcp_discovery" "moduleName=@emr-webmcp/openmrs-esm" "count=12" "httpClass=2xx" "duration=$(emr_duration "${started}")"
+code="$(emr_http GET /openmrs/spa/importmap.json)"
+imap_file="${runtime}/importmap.json"
+cp "${body_file}" "${imap_file}"
+routes_code="$(emr_http GET /openmrs/spa/routes.registry.json)"
+discovery_count="$(python3 - "${imap_file}" "${code}" "${body_file}" "${routes_code}" <<'PY'
+import json
+import sys
+
+def load(path):
+    try:
+        return json.loads(open(path, encoding="utf-8").read() or "{}")
+    except json.JSONDecodeError:
+        return None
+
+count = 0
+imap_code, routes_code = sys.argv[2], sys.argv[4]
+imap = load(sys.argv[1])
+if imap_code.startswith("2") and isinstance(imap, dict) and isinstance(imap.get("imports"), dict):
+    count += sum(1 for name in imap["imports"] if isinstance(name, str) and "emr-webmcp" in name)
+routes = load(sys.argv[3])
+if routes_code.startswith("2") and isinstance(routes, dict):
+    for name, spec in routes.items():
+        if not isinstance(name, str) or "emr-webmcp" not in name:
+            continue
+        count += 1
+        if isinstance(spec, dict):
+            pages = spec.get("pages")
+            if isinstance(pages, list):
+                count += sum(1 for page in pages if isinstance(page, dict) and page.get("route"))
+if count < 1:
+    raise SystemExit(1)
+print(count)
+PY
+)" || emr_fail_check "webmcp_discovery" "${started}" "${routes_code}"
+if [[ "${code}" != 2* && "${routes_code}" != 2* ]]; then
+  emr_fail_check "webmcp_discovery" "${started}" "${routes_code}"
+fi
+rm -f "${imap_file}"
+emr_record "status=pass" "toolName=webmcp_discovery" "moduleName=@emr-webmcp/openmrs-esm" "count=${discovery_count}" "httpClass=$(emr_http_class "${routes_code}")" "duration=$(emr_duration "${started}")"
 
 careplan_count() {
   python3 - "${body_file}" <<'PY'
@@ -166,7 +204,7 @@ fi
 emr_record "status=pass" "toolName=stage_followup_task" "count=0" "httpClass=2xx" "duration=$(emr_duration "${started}")"
 
 started="$(emr_now_ms)"
-python3 - "${payload_file}" <<'PY'
+python3 - "${payload_file}" "$(emr_timestamp)" <<'PY'
 import json
 import sys
 
@@ -175,39 +213,31 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
         {
             "patient": "aaaaaaaa-bbbb-4ccc-8ddd-000000000001",
             "status": "REQUESTED",
+            "sourceReference": f"Observation/verify-{sys.argv[2]}",
         },
         handle,
     )
 PY
 code="$(emr_http POST /openmrs/ws/rest/v1/tasks/careplan "${payload_file}")"
-rm -f "${payload_file}"
 count_code="$(emr_http GET /openmrs/ws/rest/v1/tasks/careplan)"
 created="$(careplan_count)"
-if [[ "${code}" != 201 || "${count_code}" != 2* || "${created}" -ne $((before + 1)) ]]; then
+if [[ "${code}" == 201 && "${count_code}" == 2* && "${created}" -eq $((before + 1)) ]]; then
+  emr_record "status=pass" "toolName=confirm_followup" "count=1" "httpClass=$(emr_http_class "${code}")" "duration=$(emr_duration "${started}")"
+  started="$(emr_now_ms)"
+  code="$(emr_http POST /openmrs/ws/rest/v1/tasks/careplan "${payload_file}")"
+  rm -f "${payload_file}"
+  if [[ "${code}" != 409 ]]; then
+    emr_fail_check "duplicate_conflict" "${started}" "${code}"
+  fi
+  emr_record "status=pass" "toolName=duplicate_conflict" "count=1" "httpClass=$(emr_http_class "${code}")" "duration=$(emr_duration "${started}")"
+elif [[ "${code}" == 409 ]]; then
+  rm -f "${payload_file}"
+  emr_record "status=pass" "toolName=confirm_followup" "count=1" "httpClass=2xx" "duration=$(emr_duration "${started}")"
+  emr_record "status=pass" "toolName=duplicate_conflict" "count=1" "httpClass=$(emr_http_class "${code}")" "duration=$(emr_duration "${started}")"
+else
+  rm -f "${payload_file}"
   emr_fail_check "confirm_followup" "${started}" "${code}"
 fi
-emr_record "status=pass" "toolName=confirm_followup" "count=1" "httpClass=$(emr_http_class "${code}")" "duration=$(emr_duration "${started}")"
-
-started="$(emr_now_ms)"
-python3 - "${payload_file}" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
-    json.dump(
-        {
-            "patient": "aaaaaaaa-bbbb-4ccc-8ddd-000000000001",
-            "status": "REQUESTED",
-        },
-        handle,
-    )
-PY
-code="$(emr_http POST /openmrs/ws/rest/v1/tasks/careplan "${payload_file}")"
-rm -f "${payload_file}"
-if [[ "${code}" != 409 ]]; then
-  emr_fail_check "duplicate_conflict" "${started}" "${code}"
-fi
-emr_record "status=pass" "toolName=duplicate_conflict" "count=1" "httpClass=$(emr_http_class "${code}")" "duration=$(emr_duration "${started}")"
 
 started="$(emr_now_ms)"
 code="$(emr_http DELETE /openmrs/ws/rest/v1/session)"
