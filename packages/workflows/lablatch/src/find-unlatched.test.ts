@@ -6,8 +6,6 @@ import {
   type ResultSummary,
 } from '@emr-webmcp/core';
 import { createFixtureAdapter } from '@emr-webmcp/contract-fixture';
-import { createOpenmrsAdapter } from '@emr-webmcp/openmrs-adapter';
-import { createOpenmrsMswFetch, createOpenmrsMswStore } from '@emr-webmcp/openmrs-adapter/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import { UNLATCHED_LIMIT, findUnlatched } from './find-unlatched.js';
@@ -23,17 +21,6 @@ const backends: Backend[] = [
   {
     name: 'fixture',
     makeAdapter: () => createFixtureAdapter({ now: () => FIXTURE_NOW }),
-  },
-  {
-    name: 'openmrs',
-    makeAdapter: () => {
-      const store = createOpenmrsMswStore();
-      return createOpenmrsAdapter({
-        fetch: createOpenmrsMswFetch(store),
-        now: () => FIXTURE_NOW,
-        getActivePatientId: () => store.activePatientId,
-      });
-    },
   },
 ];
 

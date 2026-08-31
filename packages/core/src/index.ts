@@ -20,6 +20,7 @@ export type {
   ToolResultDeps,
 } from './contracts/tool-result.js';
 export { errorResult, successResult } from './contracts/tool-result.js';
+export { DraftStore, type DraftStoreOptions } from './drafts/draft-store.js';
 export type { ModelContext, ModelContextTool } from './tools/model-context.js';
 export type {
   RegistrationContext,

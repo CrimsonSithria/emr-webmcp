@@ -51,6 +51,7 @@ export type OpenmrsAdapterOptions = {
   navigate?: OpenmrsNavigate;
   getActivePatientId?: () => string | null;
   signal?: AbortSignal;
+  canCreateFollowup?: () => boolean;
 };
 
 export function createOpenmrsAdapter(options: OpenmrsAdapterOptions): EmrAdapter {
@@ -64,10 +65,12 @@ class OpenmrsAdapter implements EmrAdapter {
   private readonly navigateImpl?: OpenmrsNavigate;
   private readonly getActivePatientId?: () => string | null;
   private readonly signal?: AbortSignal;
+  private readonly canCreateFollowup: () => boolean;
 
   constructor(options: OpenmrsAdapterOptions) {
     this.client = new OpenmrsClient(options.fetch);
     this.now = options.now ?? (() => new Date());
+    this.canCreateFollowup = options.canCreateFollowup ?? (() => true);
     if (options.navigate !== undefined) {
       this.navigateImpl = options.navigate;
     }
@@ -249,7 +252,14 @@ class OpenmrsAdapter implements EmrAdapter {
   }
 
   async createFollowup(input: ConfirmedFollowup): Promise<FollowupSummary> {
+    if (this.canCreateFollowup() === false) {
+      throw new AdapterError('unauthorized', 'Not authorized.', false);
+    }
+
     await this.requirePatient(input.patient.id);
+    if (input.sourceReference !== undefined && input.sourceReference !== '') {
+      await this.requireMatchingSource(input.patient.id, input.sourceReference);
+    }
 
     if (input.sourceReference !== undefined) {
       const existing = await this.listFollowups({
@@ -319,6 +329,24 @@ class OpenmrsAdapter implements EmrAdapter {
       throw remapNotFound(error, 'Patient was not found.');
     }
   }
+
+  private async requireMatchingSource(patientId: string, sourceReference: string): Promise<void> {
+    const resultId = observationId(sourceReference);
+    if (resultId === undefined) {
+      throw invalidInput('Source reference is invalid.');
+    }
+
+    const result = await this.getResult(resultId);
+    if (result.patient.id !== patientId) {
+      throw invalidInput('Source patient does not match the follow-up patient.');
+    }
+  }
+}
+
+function observationId(sourceReference: string): string | undefined {
+  const match = /^Observation\/([A-Za-z0-9._-]+)$/.exec(sourceReference);
+  const id = match?.[1];
+  return id === undefined || id === '' ? undefined : id;
 }
 
 function assertValidTarget(target: EmrNavigationTarget): void {

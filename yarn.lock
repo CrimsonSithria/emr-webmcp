@@ -618,14 +618,12 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@emr-webmcp/lablatch@workspace:packages/workflows/lablatch":
+"@emr-webmcp/lablatch@workspace:^, @emr-webmcp/lablatch@workspace:packages/workflows/lablatch":
   version: 0.0.0-use.local
   resolution: "@emr-webmcp/lablatch@workspace:packages/workflows/lablatch"
   dependencies:
     "@emr-webmcp/contract-fixture": "workspace:^"
     "@emr-webmcp/core": "workspace:^"
-    "@emr-webmcp/openmrs-adapter": "workspace:^"
-    msw: "npm:2.15.0"
   languageName: unknown
   linkType: soft
 
@@ -634,6 +632,7 @@ __metadata:
   resolution: "@emr-webmcp/openmrs-adapter@workspace:packages/adapters/openmrs"
   dependencies:
     "@emr-webmcp/core": "workspace:^"
+    "@emr-webmcp/lablatch": "workspace:^"
     msw: "npm:2.15.0"
   languageName: unknown
   linkType: soft

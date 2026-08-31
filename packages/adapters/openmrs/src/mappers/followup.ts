@@ -5,12 +5,13 @@ import type {
   PatientRef,
 } from '@emr-webmcp/core';
 
+import { decodeCorrelation, encodeCorrelation } from '@emr-webmcp/lablatch/correlation-codec';
+
 import { referenceId, type FhirCarePlan, type FhirReference } from '../transport/fhir-types.js';
 import type { RestProvider, RestRole } from '../transport/rest-types.js';
 import { mapPatient, restPatient } from './patient.js';
 
 export const PRIORITY_EXTENSION = 'priority';
-const CORRELATION = /^\[emr-webmcp:v1 source=(\S+) workflow=lablatch\]$/;
 
 export function mapCarePlan(raw: FhirCarePlan): FollowupSummary | undefined {
   const id = raw.id;
@@ -88,21 +89,14 @@ export function encodeSourceReference(rationale: string, sourceReference?: strin
   if (sourceReference === undefined || sourceReference === '') {
     return rationale;
   }
-  return `${rationale.replace(/\s+$/u, '')}\n[emr-webmcp:v1 source=${sourceReference} workflow=lablatch]`;
+  return encodeCorrelation(rationale, sourceReference);
 }
 
 export function decodeSourceReference(text: string | undefined): string | undefined {
   if (text === undefined || text === '') {
     return undefined;
   }
-  const lines = text.split(/\r?\n/u);
-  const last = lines[lines.length - 1]?.trim();
-  if (last === undefined) {
-    return undefined;
-  }
-  const match = CORRELATION.exec(last);
-  const source = match?.[1];
-  return source === undefined || source === '' ? undefined : source;
+  return decodeCorrelation(text).sourceReference;
 }
 
 export function mapProvider(raw: RestProvider): AssigneeSummary | undefined {

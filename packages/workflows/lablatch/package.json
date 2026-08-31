@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/find-unlatched.ts"
+    ".": "./src/find-unlatched.ts",
+    "./correlation-codec": "./src/correlation-codec.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -16,8 +17,6 @@
     "@emr-webmcp/core": "workspace:^"
   },
   "devDependencies": {
-    "@emr-webmcp/contract-fixture": "workspace:^",
-    "@emr-webmcp/openmrs-adapter": "workspace:^",
-    "msw": "2.15.0"
+    "@emr-webmcp/contract-fixture": "workspace:^"
   }
 }
