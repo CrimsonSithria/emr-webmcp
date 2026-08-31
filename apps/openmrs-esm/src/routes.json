@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.openmrs.org/routes.schema.json",
+  "pages": [
+    {
+      "route": "emr-webmcp",
+      "component": "root",
+      "online": true,
+      "offline": true
+    }
+  ],
+  "extensions": []
+}

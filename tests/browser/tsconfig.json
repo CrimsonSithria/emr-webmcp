@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["@playwright/test"]
+  },
+  "include": [
+    "fixtures/**/*.ts",
+    "fixtures/**/*.d.ts",
+    "harness/**/*.ts",
+    "specs/**/*.ts",
+    "scenarios/**/*.ts",
+    "reporters/**/*.ts",
+    "playwright.config.ts",
+    "vite.config.ts"
+  ]
+}

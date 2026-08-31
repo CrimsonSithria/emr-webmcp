@@ -1,0 +1,10 @@
+{
+  "id": "clinic",
+  "syntheaImage": "docker.io/library/eclipse-temurin:17.0.15_6-jre-jammy",
+  "syntheaRelease": "v3.4.0",
+  "seed": 2026083103,
+  "population": 10000,
+  "runIdPrefix": "emr-webmcp-clinic",
+  "outputDir": "artifacts/simulation/clinic",
+  "fhirVersion": "R4"
+}

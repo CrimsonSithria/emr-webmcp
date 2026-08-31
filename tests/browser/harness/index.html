@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>EMR WebMCP review harness</title>
+  </head>
+  <body>
+    <main id="app">
+      <section id="clinic-panel" data-testid="clinic-panel">
+        <p data-testid="clinic-profile">default</p>
+        <p data-testid="clinic-counts"></p>
+        <p data-testid="auth-state">signed-in</p>
+        <p data-testid="active-patient"></p>
+        <p data-testid="chart-brief"></p>
+        <p data-testid="unsupported-note" hidden>unsupported</p>
+        <input data-testid="patient-search" />
+        <button type="button" data-testid="patient-search-submit">Search</button>
+        <ul data-testid="patient-search-results"></ul>
+        <button type="button" data-testid="refresh-reads">Refresh reads</button>
+        <ul data-testid="appointment-list"></ul>
+        <ul data-testid="abnormal-results"></ul>
+        <ul data-testid="followup-list"></ul>
+        <ul data-testid="assignee-list"></ul>
+        <button type="button" data-testid="navigate-chart">Open chart</button>
+        <button type="button" data-testid="navigate-review">Open review</button>
+        <button type="button" data-testid="stage-followup">Stage follow-up</button>
+        <button type="button" data-testid="logout">Log out</button>
+        <input data-testid="route-input" value="/emr-webmcp" />
+        <button type="button" data-testid="apply-route">Change route</button>
+      </section>
+      <section id="review-queue" data-testid="review-queue"></section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

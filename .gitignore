@@ -12,6 +12,10 @@ playwright-report/
 test-results/
 artifacts/
 simulation/generated/
+# Local Synthea jar cache. Generated FHIR bundles stay under artifacts/simulation/.
+simulation/.cache/
+# Operator-local backup override. Default is VPS-only /srv/emr-webmcp/backups.
+deploy/crimson-prime/backups/
 *.log
 *.pem
 *.key

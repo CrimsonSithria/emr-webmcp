@@ -1,0 +1,23 @@
+{
+  "name": "@emr-webmcp/simulation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./profile-schema": "./src/profile-schema.ts",
+    "./manifest": "./src/manifest.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "generate": "node --experimental-strip-types --import ./scripts/register-ts-resolve.mjs ./src/manifest.ts",
+    "import": "node --experimental-strip-types --import ./scripts/register-ts-resolve.mjs ./src/openmrs-admin-client.ts",
+    "seed": "node --experimental-strip-types --import ./scripts/register-ts-resolve.mjs ./src/workload-seeder.ts",
+    "report": "node --experimental-strip-types --import ./scripts/register-ts-resolve.mjs ./src/report/write-report.ts"
+  },
+  "dependencies": {
+    "zod": "4.5.4"
+  }
+}

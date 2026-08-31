@@ -1,0 +1,10 @@
+{
+  "id": "smoke",
+  "syntheaImage": "docker.io/library/eclipse-temurin:17.0.15_6-jre-jammy",
+  "syntheaRelease": "v3.4.0",
+  "seed": 2026083101,
+  "population": 25,
+  "runIdPrefix": "emr-webmcp-smoke",
+  "outputDir": "artifacts/simulation/smoke",
+  "fhirVersion": "R4"
+}
