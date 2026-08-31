@@ -7,6 +7,7 @@ export default defineConfig({
       // double-run adapter tests. List leaf package roots only.
       'packages/core',
       'packages/adapters/*',
+      'packages/workflows/*',
       {
         test: {
           name: 'contract',

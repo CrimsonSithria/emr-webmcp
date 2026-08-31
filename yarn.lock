@@ -569,7 +569,18 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@emr-webmcp/contract-fixture@workspace:*, @emr-webmcp/contract-fixture@workspace:packages/adapters/contract-fixture":
+"@emr-webmcp/clinic-prep@workspace:packages/workflows/clinic-prep":
+  version: 0.0.0-use.local
+  resolution: "@emr-webmcp/clinic-prep@workspace:packages/workflows/clinic-prep"
+  dependencies:
+    "@emr-webmcp/contract-fixture": "workspace:^"
+    "@emr-webmcp/core": "workspace:^"
+    "@emr-webmcp/openmrs-adapter": "workspace:^"
+    msw: "npm:2.15.0"
+  languageName: unknown
+  linkType: soft
+
+"@emr-webmcp/contract-fixture@workspace:*, @emr-webmcp/contract-fixture@workspace:^, @emr-webmcp/contract-fixture@workspace:packages/adapters/contract-fixture":
   version: 0.0.0-use.local
   resolution: "@emr-webmcp/contract-fixture@workspace:packages/adapters/contract-fixture"
   dependencies:
@@ -588,11 +599,33 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@emr-webmcp/coordination@workspace:packages/workflows/coordination":
+  version: 0.0.0-use.local
+  resolution: "@emr-webmcp/coordination@workspace:packages/workflows/coordination"
+  dependencies:
+    "@emr-webmcp/contract-fixture": "workspace:^"
+    "@emr-webmcp/core": "workspace:^"
+    "@emr-webmcp/openmrs-adapter": "workspace:^"
+    msw: "npm:2.15.0"
+  languageName: unknown
+  linkType: soft
+
 "@emr-webmcp/core@workspace:*, @emr-webmcp/core@workspace:^, @emr-webmcp/core@workspace:packages/core":
   version: 0.0.0-use.local
   resolution: "@emr-webmcp/core@workspace:packages/core"
   dependencies:
     zod: "npm:4.5.4"
+  languageName: unknown
+  linkType: soft
+
+"@emr-webmcp/lablatch@workspace:packages/workflows/lablatch":
+  version: 0.0.0-use.local
+  resolution: "@emr-webmcp/lablatch@workspace:packages/workflows/lablatch"
+  dependencies:
+    "@emr-webmcp/contract-fixture": "workspace:^"
+    "@emr-webmcp/core": "workspace:^"
+    "@emr-webmcp/openmrs-adapter": "workspace:^"
+    msw: "npm:2.15.0"
   languageName: unknown
   linkType: soft
 
