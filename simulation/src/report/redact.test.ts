@@ -176,8 +176,9 @@ describe('evaluation aggregation', () => {
     expectScrubbed(result.summary);
     expectScrubbed(result.markdown);
     expect(result.summary.runId).toBe('emr-webmcp-smoke-testrun');
-    expect(result.summary.status).toBe('blocked-stale');
+    expect(result.summary.status).toBe('success');
     expect(result.summary.count).toBe(1);
+    expect(result.summary.records[0]?.status).toBe('blocked-stale');
     expect(result.markdown).toContain('| scenarioId | runId | status | count |');
     expect(result.markdown).not.toContain('rationale');
     expect(result.markdown).not.toContain('cookie');
@@ -249,6 +250,43 @@ describe('evaluation aggregation', () => {
     expect(stress.summary.status).toBe('stress-only');
   });
 
+  it('fails the summary when any record failed and counts all records', () => {
+    const outputDir = join(EVALUATION_OUTPUT_PREFIX, `mix-${crypto.randomUUID()}`);
+    evaluationDirs.push(join(repoRoot, outputDir));
+    const mixed = aggregateEvaluation(
+      [
+        {
+          scenarioId: 'read-search-patients',
+          runId: 'emr-webmcp-eval-mix',
+          status: 'success',
+          count: 100,
+          duration: 210,
+          adapterId: 'openmrs',
+        },
+        {
+          scenarioId: 'stale-draft',
+          runId: 'emr-webmcp-eval-mix',
+          status: 'failed',
+          count: 1,
+          duration: 88,
+          adapterId: 'openmrs',
+        },
+        {
+          scenarioId: 'stress-mixed-clinic',
+          runId: 'emr-webmcp-eval-mix',
+          status: 'stress-only',
+          count: 50,
+          duration: 2100,
+          adapterId: 'openmrs',
+        },
+      ],
+      { runId: 'emr-webmcp-eval-mix', outputDir },
+    );
+    expect(mixed.summary.status).toBe('failed');
+    expect(mixed.summary.count).toBe(3);
+    expect(mixed.summary.records).toHaveLength(3);
+  });
+
   it('keeps the 50-VU gate when count is 100 and status is success', () => {
     const outputDir = join(EVALUATION_OUTPUT_PREFIX, `large-${crypto.randomUUID()}`);
     evaluationDirs.push(join(repoRoot, outputDir));
@@ -269,7 +307,7 @@ describe('evaluation aggregation', () => {
       { runId: 'emr-webmcp-demo-eval', outputDir },
     );
     expect(large.summary.status).toBe('success');
-    expect(large.summary.count).toBe(100);
+    expect(large.summary.count).toBe(1);
     expect(large.summary.gate).toEqual({
       vus: 50,
       maxErrorRate: 0.01,

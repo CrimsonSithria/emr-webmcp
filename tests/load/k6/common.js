@@ -6,17 +6,35 @@ export const GATE = {
   maxBoundedReadP95Ms: 1500,
 };
 
-export function resolveVus() {
-  const raw = Number(__ENV.VUS || 1);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1;
+export const OPENMRS_PATHS = {
+  patients: '/ws/rest/v1/patient',
+  appointments: '/ws/rest/v1/appointment',
+  observations: '/ws/fhir2/R4/Observation',
+  carePlans: '/ws/rest/v1/tasks/careplan',
+};
+
+const SYNTHETIC_LOAD_PATIENT = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001';
+const LOAD_FROM_DATE = '2026-08-31T00:00:00.000Z';
+const LOAD_TO_DATE = '2026-09-30T00:00:00.000Z';
+
+function readEnv(name, fallback) {
+  const env = typeof __ENV === 'undefined' ? {} : __ENV;
+  const value = env[name];
+  return value === undefined || value === '' ? fallback : value;
+}
+
+export function resolveVus(defaultVus) {
+  const fallback = Number.isFinite(defaultVus) && defaultVus > 0 ? Math.floor(defaultVus) : 1;
+  const raw = Number(readEnv('VUS', fallback));
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
 }
 
 export function resolveBaseUrl() {
-  return __ENV.BASE_URL || 'http://127.0.0.1:8080';
+  return readEnv('BASE_URL', 'http://127.0.0.1:8080');
 }
 
 export function resolveProfile() {
-  return __ENV.PROFILE || 'demo';
+  return readEnv('PROFILE', 'demo');
 }
 
 export function durationFor(profile) {
@@ -40,7 +58,7 @@ export function thresholdsFor(vus) {
 }
 
 export function authHeaders() {
-  const cookie = __ENV.OPENMRS_SESSION || '';
+  const cookie = readEnv('OPENMRS_SESSION', '');
   if (cookie === '') {
     return {};
   }
@@ -63,16 +81,74 @@ export function loadOptions() {
   };
 }
 
-export function k6EvaluationRecords(data) {
+export function withQuery(path, query) {
+  const entries = Object.entries(query ?? {});
+  if (entries.length === 0) {
+    return path;
+  }
+  const search = entries
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+    .join('&');
+  return `${path}?${search}`;
+}
+
+export function openmrsUrl(base, resourcePath, query) {
+  const origin = String(base).replace(/\/$/u, '');
+  return `${origin}/openmrs${withQuery(resourcePath, query)}`;
+}
+
+export function mixedClinicReads(base) {
+  return [
+    openmrsUrl(base, OPENMRS_PATHS.patients, { q: '', limit: '20', v: 'default' }),
+    openmrsUrl(base, OPENMRS_PATHS.appointments, { fromDate: LOAD_FROM_DATE, toDate: LOAD_TO_DATE }),
+    openmrsUrl(base, OPENMRS_PATHS.observations, {
+      patient: SYNTHETIC_LOAD_PATIENT,
+      category: 'laboratory',
+      _count: '20',
+    }),
+    openmrsUrl(base, OPENMRS_PATHS.carePlans, { patient: SYNTHETIC_LOAD_PATIENT }),
+  ];
+}
+
+export function readToolReads(base) {
+  return [
+    openmrsUrl(base, OPENMRS_PATHS.patients, { q: '', limit: '20', v: 'default' }),
+    openmrsUrl(base, OPENMRS_PATHS.appointments, { fromDate: LOAD_FROM_DATE, toDate: LOAD_TO_DATE }),
+    openmrsUrl(base, OPENMRS_PATHS.observations, {
+      patient: SYNTHETIC_LOAD_PATIENT,
+      category: 'laboratory',
+      _count: '20',
+    }),
+  ];
+}
+
+export function thresholdsPassed(data) {
+  const metrics = data && data.metrics ? data.metrics : {};
+  for (const metric of Object.values(metrics)) {
+    const thresholds = metric && metric.thresholds;
+    if (!thresholds) {
+      continue;
+    }
+    for (const result of Object.values(thresholds)) {
+      if (result && result.ok === false) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+export function k6EvaluationRecords(data, options) {
   const vus = resolveVus();
-  const failed = data.metrics.http_req_failed ? data.metrics.http_req_failed.values.rate : 0;
-  const p95 = data.metrics.http_req_duration ? data.metrics.http_req_duration.values['p(95)'] : 0;
-  const count = data.metrics.http_reqs ? data.metrics.http_reqs.values.count : 0;
+  const stress = Boolean(options && options.stress) || vus >= 100;
+  const failed = data.metrics && data.metrics.http_req_failed ? data.metrics.http_req_failed.values.rate : 0;
+  const p95 = data.metrics && data.metrics.http_req_duration ? data.metrics.http_req_duration.values['p(95)'] : 0;
+  const count = data.metrics && data.metrics.http_reqs ? data.metrics.http_reqs.values.count : 0;
   return [
     {
-      scenarioId: vus >= 100 ? 'stress-mixed-clinic' : 'mixed-clinic-load',
+      scenarioId: stress ? 'stress-mixed-clinic' : 'mixed-clinic-load',
       runId: `emr-webmcp-${resolveProfile()}-load`,
-      status: vus >= 100 ? 'stress-only' : 'success',
+      status: stress ? 'stress-only' : thresholdsPassed(data) ? 'success' : 'failed',
       count,
       duration: p95,
       percentile: 95,

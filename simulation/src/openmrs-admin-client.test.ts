@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { createHttpAdminClient } from './openmrs-admin-client.js';
+import { createMemoryManifestStore, type SimulationManifest } from './manifest.js';
+import { createHttpAdminClient, importGeneratedDocuments } from './openmrs-admin-client.js';
 
 function searchset(options: {
   id: string;
@@ -56,5 +57,60 @@ describe('HTTP identifier search', () => {
       idempotencyKey: 'emr-webmcp:run:observation:1',
       patientId: '',
     });
+  });
+});
+
+function sampleManifest(): SimulationManifest {
+  return {
+    generatorVersion: 'v3.4.0',
+    seed: '2026083101',
+    counts: {
+      patients: 25,
+      generated: 25,
+      imported: 0,
+      rejected: 0,
+    },
+    timestamps: {
+      startedAt: '2026-08-31T02:09:00.000Z',
+      completedAt: '2026-08-31T02:09:00.000Z',
+    },
+    checksums: {
+      profile: 'a'.repeat(64),
+      files: { 'fhir/bundle-001.json': 'b'.repeat(64) },
+    },
+    attestation: 'synthetic-data-only',
+    runId: 'emr-webmcp-smoke-testrun',
+    profileId: 'smoke',
+    fhirVersion: 'R4',
+  };
+}
+
+describe('import generated documents', () => {
+  it('writes imported and rejected counts back to the manifest', async () => {
+    const store = createMemoryManifestStore();
+    const outputDir = 'artifacts/simulation/smoke';
+    await store.writeManifest(outputDir, sampleManifest());
+    const outcomes: Array<'imported' | 'rejected'> = ['imported', 'rejected', 'imported'];
+    const client = {
+      importDocument() {
+        const next = outcomes.shift();
+        expect(next).toBeDefined();
+        return Promise.resolve(next ?? 'rejected');
+      },
+    };
+
+    const result = await importGeneratedDocuments({
+      client: client as never,
+      store,
+      outputDir,
+      documents: [{ resourceType: 'Bundle' }, { resourceType: 'Bundle' }, { resourceType: 'Bundle' }],
+    });
+
+    expect(result).toEqual({ imported: 2, rejected: 1 });
+    const written = await store.readManifest(outputDir);
+    expect(written?.counts.imported).toBe(2);
+    expect(written?.counts.rejected).toBe(1);
+    expect(written?.counts.patients).toBe(25);
+    expect(written?.counts.generated).toBe(25);
   });
 });

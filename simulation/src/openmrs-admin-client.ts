@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadProfile, type ProfileId } from './profile-schema.js';
-import { createFsManifestStore } from './manifest.js';
+import { createFsManifestStore, type ManifestStore } from './manifest.js';
 import { resourceIdFromKey, WORKLOAD_IDEMPOTENCY_SYSTEM } from './workload-plan.js';
 
 export class OpenMrsAdminError extends Error {
@@ -474,17 +474,45 @@ async function main(argv: string[]): Promise<void> {
 
   const outputDir = path.resolve(repoRoot, profile.outputDir);
   const documents = await readFhirDocuments(outputDir);
+  const { imported, rejected } = await importGeneratedDocuments({
+    client,
+    store,
+    outputDir: profile.outputDir,
+    documents,
+  });
+  process.stdout.write(`import imported=${imported} rejected=${rejected}\n`);
+}
+
+export async function importGeneratedDocuments(options: {
+  client: Pick<OpenMrsAdminClient, 'importDocument'>;
+  store: ManifestStore;
+  outputDir: string;
+  documents: readonly unknown[];
+}): Promise<{ imported: number; rejected: number }> {
   let imported = 0;
   let rejected = 0;
-  for (const document of documents) {
-    const result = await client.importDocument(document);
+  for (const document of options.documents) {
+    const result = await options.client.importDocument(document);
     if (result === 'imported') {
       imported += 1;
     } else {
       rejected += 1;
     }
   }
-  process.stdout.write(`import imported=${imported} rejected=${rejected}\n`);
+
+  const manifest = await options.store.readManifest(options.outputDir);
+  if (manifest !== undefined) {
+    await options.store.writeManifest(options.outputDir, {
+      ...manifest,
+      counts: {
+        ...manifest.counts,
+        imported,
+        rejected,
+      },
+    });
+  }
+
+  return { imported, rejected };
 }
 
 const invokedAsCli =
