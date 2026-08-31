@@ -1,0 +1,10 @@
+{
+  "id": "demo",
+  "syntheaImage": "docker.io/library/eclipse-temurin:17.0.15_6-jre-jammy",
+  "syntheaRelease": "v3.4.0",
+  "seed": 2026083102,
+  "population": 500,
+  "runIdPrefix": "emr-webmcp-demo",
+  "outputDir": "artifacts/simulation/demo",
+  "fhirVersion": "R4"
+}

@@ -12,6 +12,8 @@ playwright-report/
 test-results/
 artifacts/
 simulation/generated/
+# Local Synthea jar cache. Generated FHIR bundles stay under artifacts/simulation/.
+simulation/.cache/
 *.log
 *.pem
 *.key

@@ -10,6 +10,7 @@
     "packages/core",
     "packages/adapters/*",
     "packages/workflows/*",
+    "simulation",
     "tests/contract",
     "tests/browser"
   ],

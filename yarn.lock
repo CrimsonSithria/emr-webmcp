@@ -701,6 +701,14 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@emr-webmcp/simulation@workspace:simulation":
+  version: 0.0.0-use.local
+  resolution: "@emr-webmcp/simulation@workspace:simulation"
+  dependencies:
+    zod: "npm:4.5.4"
+  languageName: unknown
+  linkType: soft
+
 "@esbuild/aix-ppc64@npm:0.25.12":
   version: 0.25.12
   resolution: "@esbuild/aix-ppc64@npm:0.25.12"
