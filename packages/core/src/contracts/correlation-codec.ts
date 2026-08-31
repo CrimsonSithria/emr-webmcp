@@ -1,4 +1,4 @@
-import { AdapterError } from '@emr-webmcp/core';
+import { AdapterError } from './adapter-error.js';
 
 const MARKER_LINE = /^\[emr-webmcp:v1 source=(.*) workflow=lablatch\]$/;
 const VALID_SOURCE = /^Observation\/[A-Za-z0-9._-]+$/;
@@ -22,7 +22,9 @@ export function decodeCorrelation(text: string): DecodedCorrelation {
   }
 
   const source = match[1] ?? '';
-  assertValidSource(source);
+  if (!VALID_SOURCE.test(source)) {
+    return { rationale: text };
+  }
 
   const decoded: DecodedCorrelation = {
     rationale: lines.slice(0, -1).join('\n'),

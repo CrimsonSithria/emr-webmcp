@@ -1,9 +1,9 @@
+import { AdapterError, type DraftStore, type EmrAdapter, type FollowupDraft } from '@emr-webmcp/core';
 import { useEffect, useState } from 'react';
-import type { DraftStore, EmrAdapter, FollowupDraft } from '@emr-webmcp/core';
 
 import { USE_PRIVILEGE } from '../openmrs/adapter-factory';
 import type { SessionSnapshot } from '../webmcp/use-webmcp-registration';
-import type { ConfirmationPorts } from './confirmation-controller';
+import { releaseConfirmationController, type ConfirmationPorts } from './confirmation-controller';
 
 export type ReviewWorkspacePorts = {
   getStore: () => DraftStore | null;
@@ -19,14 +19,17 @@ export type ReviewWorkspaceView = {
 };
 
 let bound: ReviewWorkspacePorts | null = null;
+let sessionPorts: ConfirmationPorts | null = null;
 const listeners = new Set<() => void>();
 
 export function bindReviewWorkspace(ports: ReviewWorkspacePorts): () => void {
   bound = ports;
+  sessionPorts = null;
   notifyReviewWorkspace();
   return () => {
     if (bound === ports) {
       bound = null;
+      sessionPorts = null;
       notifyReviewWorkspace();
     }
   };
@@ -62,29 +65,54 @@ export function readReviewWorkspace(): ReviewWorkspaceView {
 
   const store = bound.getStore();
   const adapter = bound.getAdapter();
-  const session = bound.getSession();
-  const privileges = bound.getPrivileges();
-  const drafts =
-    store === null ? [] : store.diagnostics().draftIds.map((draftId) => store.peek(draftId));
-
   if (store === null) {
     return { drafts: [], adapterId: adapter.id, ports: null };
   }
 
-  const ports: ConfirmationPorts = {
-    peek: (draftId) => store.peek(draftId),
+  const drafts = store.diagnostics().draftIds.map((draftId) => store.peek(draftId));
+  return { drafts, adapterId: adapter.id, ports: livePorts() };
+}
+
+function livePorts(): ConfirmationPorts | null {
+  if (bound === null || bound.getStore() === null) {
+    sessionPorts = null;
+    return null;
+  }
+  if (sessionPorts !== null) {
+    return sessionPorts;
+  }
+  sessionPorts = {
+    peek: (draftId) => requireStore().peek(draftId),
     consume: (draftId) => {
-      const draft = store.consume(draftId);
+      const draft = requireStore().consume(draftId);
+      releaseConfirmationController(draftId);
       notifyReviewWorkspace();
       return draft;
     },
-    getResult: (resultId) => adapter.getResult(resultId),
-    listFollowups: (query) => adapter.listFollowups(query),
-    createFollowup: (input) => adapter.createFollowup(input),
-    isAuthenticated: () => session.authenticated && session.userId !== null,
-    hasUsePrivilege: () => privileges.has(USE_PRIVILEGE),
+    getResult: (resultId) => requireBound().getAdapter().getResult(resultId),
+    listFollowups: (query) => requireBound().getAdapter().listFollowups(query),
+    createFollowup: (input) => requireBound().getAdapter().createFollowup(input),
+    isAuthenticated: () => {
+      const session = requireBound().getSession();
+      return session.authenticated && session.userId !== null;
+    },
+    hasUsePrivilege: () => requireBound().getPrivileges().has(USE_PRIVILEGE),
     isOnline: () => navigator.onLine,
   };
+  return sessionPorts;
+}
 
-  return { drafts, adapterId: adapter.id, ports };
+function requireBound(): ReviewWorkspacePorts {
+  if (bound === null) {
+    throw new AdapterError('not-found', 'Review workspace is not bound.', false);
+  }
+  return bound;
+}
+
+function requireStore(): DraftStore {
+  const store = requireBound().getStore();
+  if (store === null) {
+    throw new AdapterError('not-found', 'Draft store is not available.', false);
+  }
+  return store;
 }

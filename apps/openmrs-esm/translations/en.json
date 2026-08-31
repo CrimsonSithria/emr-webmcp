@@ -1,9 +1,20 @@
 {
-  "welcomeToModule": "Welcome to esm!",
-  "getStarted": "Get started by adding routes, extensions, or components.",
-  "webmcpUnavailable": "This browser does not expose WebMCP. The module remains available.",
   "confirmFollowup": "Confirm follow-up",
+  "disabledDuplicateActive": "An active follow-up already exists for this source.",
+  "disabledLostPrivilege": "You no longer have permission to confirm follow-ups.",
+  "disabledOffline": "You are offline. Confirmation is unavailable.",
+  "disabledPatientMismatch": "The source result belongs to a different patient.",
+  "disabledStaleSource": "The source result is no longer available.",
+  "failedConflict": "An active follow-up already exists for this source.",
+  "failedInvalidInput": "The follow-up could not be confirmed because the input is invalid.",
+  "failedNotFound": "The draft or source could not be found.",
+  "failedUnauthorized": "Confirmation was refused because you are not authorized.",
+  "failedUnsupported": "Confirmation is not supported.",
+  "failedUpstream": "Confirmation failed because the server could not be reached. You can try again.",
+  "getStarted": "Get started by adding routes, extensions, or components.",
+  "noDueDate": "No due date",
   "noSourceEvidence": "No source evidence",
   "unassigned": "Unassigned",
-  "noDueDate": "No due date"
+  "webmcpUnavailable": "This browser does not expose WebMCP. The module remains available.",
+  "welcomeToModule": "Welcome to esm!"
 }

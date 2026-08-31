@@ -14,8 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@emr-webmcp/core": "workspace:^",
-    "@emr-webmcp/lablatch": "workspace:^"
+    "@emr-webmcp/core": "workspace:^"
   },
   "devDependencies": {
     "msw": "2.15.0"

@@ -83,7 +83,7 @@ describe.each(backends)('overdueRescue ($name)', ({ makeAdapter }) => {
   it('returns overdue follow-ups at the injected clock, ordered by priority then age', async () => {
     const adapter = makeAdapter();
     const writes = watchWrites(adapter);
-    const result = await overdueRescue(adapter, { overdueOnly: true });
+    const result = await overdueRescue(adapter);
 
     expect(result.followups.every((item) => item.dueAt !== undefined)).toBe(true);
     expect(
@@ -102,14 +102,14 @@ describe.each(backends)('overdueRescue ($name)', ({ makeAdapter }) => {
 
   it('includes newly overdue follow-ups when the clock advances', async () => {
     const adapter = makeAdapter(() => LATER_NOW);
-    const result = await overdueRescue(adapter, { overdueOnly: true });
+    const result = await overdueRescue(adapter);
 
     expect(result.followups.map((item) => item.id)).toEqual(['task-01', 'task-03', 'task-02', 'task-07']);
   });
 
   it('returns no overdue follow-ups before any due date', async () => {
     const adapter = makeAdapter(() => EARLIER_NOW);
-    const result = await overdueRescue(adapter, { overdueOnly: true });
+    const result = await overdueRescue(adapter);
 
     expect(result.followups).toEqual([]);
   });
@@ -117,7 +117,7 @@ describe.each(backends)('overdueRescue ($name)', ({ makeAdapter }) => {
   it('does not aggregate other patients when patientId is explicit', async () => {
     const adapter = makeAdapter();
     const writes = watchWrites(adapter);
-    const result = await overdueRescue(adapter, { patientId: 'patient-01', overdueOnly: true });
+    const result = await overdueRescue(adapter, { patientId: 'patient-01' });
 
     expect(result.followups.every((item) => item.patient.id === 'patient-01')).toBe(true);
     expect(result.followups.map((item) => item.id)).toEqual(['task-01']);
@@ -130,7 +130,6 @@ describe.each(backends)('overdueRescue ($name)', ({ makeAdapter }) => {
     const result = await overdueRescue(adapter, {
       assigneeId: 'person-dr-chen',
       priority: 'high',
-      overdueOnly: true,
     });
 
     expect(result.followups).toHaveLength(1);

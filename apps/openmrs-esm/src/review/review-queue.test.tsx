@@ -1,20 +1,29 @@
 import {
   AdapterError,
+  DraftStore,
   type ConfirmedFollowup,
+  type EmrAdapter,
   type FollowupDraft,
   type FollowupSummary,
   type ResultSummary,
 } from '@emr-webmcp/core';
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { USE_PRIVILEGE } from '../openmrs/adapter-factory';
 import {
   createConfirmationController,
+  resetConfirmationControllers,
   type ConfirmationPorts,
 } from './confirmation-controller';
 import { ReviewQueue } from './review-queue.component';
+import {
+  bindReviewWorkspace,
+  notifyReviewWorkspace,
+  useReviewWorkspace,
+} from './review-workspace';
 
 const DRAFT: FollowupDraft = {
   draftId: 'draft-ada-1',
@@ -44,6 +53,23 @@ const CREATED: FollowupSummary = {
   priority: 'high',
   sourceReference: DRAFT.sourceReference,
 };
+
+const DISABLED_COPY: Record<string, string> = {
+  'stale-source': 'The source result is no longer available.',
+  'patient-mismatch': 'The source result belongs to a different patient.',
+  'lost-privilege': 'You no longer have permission to confirm follow-ups.',
+  'duplicate-active': 'An active follow-up already exists for this source.',
+  offline: 'You are offline. Confirmation is unavailable.',
+};
+
+let unbindWorkspace: (() => void) | null = null;
+
+afterEach(() => {
+  cleanup();
+  unbindWorkspace?.();
+  unbindWorkspace = null;
+  resetConfirmationControllers();
+});
 
 describe('ReviewQueue', () => {
   it('shows patient identity, source evidence, proposal, assignee, priority, due date, and provenance', async () => {
@@ -115,6 +141,13 @@ describe('ReviewQueue', () => {
 
     await expectDisabled('offline');
   });
+
+  it('shows a localized disable reason and describes the Confirm button', async () => {
+    renderQueue({ isOnline: () => false });
+
+    await expectDisabled('offline');
+    expect(confirmButton()).toHaveAttribute('aria-describedby', 'confirm-reason-draft-ada-1');
+  });
 });
 
 describe('confirmation controller', () => {
@@ -132,7 +165,7 @@ describe('confirmation controller', () => {
     const validated = controller.validate(DRAFT.draftId);
     expect(controller.snapshot().phase).toBe('validating');
     await validated;
-    expect(controller.snapshot()).toEqual({ phase: 'ready', disabledReason: null });
+    expect(controller.snapshot()).toEqual({ phase: 'ready', disabledReason: null, error: null });
 
     const committed = controller.confirm(DRAFT.draftId);
     expect(controller.snapshot().phase).toBe('committing');
@@ -169,8 +202,11 @@ describe('confirmation controller', () => {
     expect(createFollowup).not.toHaveBeenCalled();
 
     const firstConfirm = controller.confirm(DRAFT.draftId);
+    expect(controller.snapshot().phase).toBe('committing');
     controller.confirm(DRAFT.draftId);
-    expect(createFollowup).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(createFollowup).toHaveBeenCalledTimes(1);
+    });
     finishCreate(CREATED);
     await firstConfirm;
     expect(controller.snapshot().phase).toBe('succeeded');
@@ -186,11 +222,11 @@ describe('confirmation controller', () => {
     );
     await failing.validate(DRAFT.draftId);
     await failing.confirm(DRAFT.draftId);
-    expect(failing.snapshot().phase).toBe('failed');
+    expect(failing.snapshot()).toEqual({ phase: 'failed', disabledReason: null, error: 'upstream' });
     expect(peek.mock.results.at(-1)?.value).toMatchObject({ draftId: DRAFT.draftId });
   });
 
-  it('does not consume the draft when createFollowup fails', async () => {
+  it('does not consume the draft when createFollowup fails and records the typed error', async () => {
     const consume = vi.fn(() => DRAFT);
     const peek = vi.fn(() => DRAFT);
     const controller = createConfirmationController(
@@ -204,9 +240,116 @@ describe('confirmation controller', () => {
     await controller.validate(DRAFT.draftId);
     await controller.confirm(DRAFT.draftId);
 
-    expect(controller.snapshot().phase).toBe('failed');
+    expect(controller.snapshot()).toEqual({ phase: 'failed', disabledReason: null, error: 'conflict' });
     expect(consume).not.toHaveBeenCalled();
     expect(peek).toHaveBeenCalled();
+  });
+
+  it('retries from failed by re-validating, mapping conflict to duplicate-active', async () => {
+    const consume = vi.fn(() => DRAFT);
+    const createFollowup = vi.fn(() =>
+      Promise.reject(new AdapterError('conflict', 'An active follow-up already exists.', false)),
+    );
+    const followups: FollowupSummary[] = [];
+    const controller = createConfirmationController(
+      stubPorts({
+        consume,
+        createFollowup,
+        listFollowups: () => Promise.resolve([...followups]),
+      }),
+    );
+
+    await controller.validate(DRAFT.draftId);
+    await controller.confirm(DRAFT.draftId);
+    expect(controller.snapshot()).toEqual({ phase: 'failed', disabledReason: null, error: 'conflict' });
+
+    followups.push({ ...CREATED, status: 'not-started' });
+    await controller.confirm(DRAFT.draftId);
+
+    expect(controller.snapshot()).toEqual({
+      phase: 'idle',
+      disabledReason: 'duplicate-active',
+      error: null,
+    });
+    expect(createFollowup).toHaveBeenCalledTimes(1);
+    expect(consume).not.toHaveBeenCalled();
+  });
+
+  it('retries a transient failure from failed and succeeds on the second confirm', async () => {
+    const consume = vi.fn(() => DRAFT);
+    const createFollowup = vi
+      .fn()
+      .mockRejectedValueOnce(new AdapterError('upstream', 'Upstream request failed', true))
+      .mockResolvedValueOnce(CREATED);
+    const controller = createConfirmationController(
+      stubPorts({
+        consume,
+        createFollowup,
+      }),
+    );
+
+    await controller.validate(DRAFT.draftId);
+    await controller.confirm(DRAFT.draftId);
+    expect(controller.snapshot().error).toBe('upstream');
+
+    await controller.confirm(DRAFT.draftId);
+    expect(controller.snapshot()).toEqual({ phase: 'succeeded', disabledReason: null, error: null });
+    expect(createFollowup).toHaveBeenCalledTimes(2);
+    expect(consume).toHaveBeenCalledTimes(1);
+  });
+
+  it('never stays in validating when peek throws', async () => {
+    const controller = createConfirmationController(
+      stubPorts({
+        peek: () => {
+          throw new AdapterError('not-found', 'Draft was not found.', false);
+        },
+      }),
+    );
+
+    await controller.validate(DRAFT.draftId);
+    expect(controller.snapshot()).toEqual({ phase: 'failed', disabledReason: null, error: 'not-found' });
+  });
+
+  it('re-checks disabled reasons before committing', async () => {
+    let online = true;
+    const createFollowup = vi.fn(() => Promise.resolve(CREATED));
+    const controller = createConfirmationController(
+      stubPorts({
+        createFollowup,
+        isOnline: () => online,
+      }),
+    );
+
+    await controller.validate(DRAFT.draftId);
+    expect(controller.snapshot().phase).toBe('ready');
+    online = false;
+
+    await controller.confirm(DRAFT.draftId);
+    expect(controller.snapshot()).toEqual({ phase: 'idle', disabledReason: 'offline', error: null });
+    expect(createFollowup).not.toHaveBeenCalled();
+  });
+
+  it('surfaces getResult upstream as a typed failure instead of stale-source', async () => {
+    const controller = createConfirmationController(
+      stubPorts({
+        getResult: () => Promise.reject(new AdapterError('upstream', 'Upstream request failed', true)),
+      }),
+    );
+
+    await controller.validate(DRAFT.draftId);
+    expect(controller.snapshot()).toEqual({ phase: 'failed', disabledReason: null, error: 'upstream' });
+  });
+
+  it('surfaces listFollowups failure as a typed failure instead of enabling confirm', async () => {
+    const controller = createConfirmationController(
+      stubPorts({
+        listFollowups: () => Promise.reject(new AdapterError('upstream', 'Upstream request failed', true)),
+      }),
+    );
+
+    await controller.validate(DRAFT.draftId);
+    expect(controller.snapshot()).toEqual({ phase: 'failed', disabledReason: null, error: 'upstream' });
   });
 });
 
@@ -243,7 +386,130 @@ describe('visible confirmation', () => {
       sourceReference: DRAFT.sourceReference,
     });
   });
+
+  it('shows a localized failure reason after a refused confirm', async () => {
+    renderQueue({
+      createFollowup: () => Promise.reject(new AdapterError('upstream', 'Upstream request failed', true)),
+    });
+    await waitFor(() => {
+      expect(confirmButton()).toBeEnabled();
+    });
+
+    await userEvent.setup().click(confirmButton());
+    await waitFor(() => {
+      expect(confirmButton()).toHaveAttribute('data-confirmation-state', 'failed');
+    });
+    expect(screen.getByTestId('confirm-reason')).toHaveTextContent(
+      'Confirmation failed because the server could not be reached. You can try again.',
+    );
+    expect(confirmButton()).toHaveAttribute('aria-describedby', 'confirm-reason-draft-ada-1');
+  });
+
+  it('re-validates when the browser goes offline after mount', async () => {
+    let online = true;
+    renderQueue({ isOnline: () => online });
+    await waitFor(() => {
+      expect(confirmButton()).toBeEnabled();
+    });
+
+    online = false;
+    window.dispatchEvent(new Event('offline'));
+    await expectDisabled('offline');
+  });
 });
+
+describe('review workspace controller lifetime', () => {
+  it('keeps a committing controller across notifyReviewWorkspace and posts once', async () => {
+    let finishCreate!: (result: FollowupSummary) => void;
+    const createFollowup = vi.fn(
+      () =>
+        new Promise<FollowupSummary>((resolve) => {
+          finishCreate = resolve;
+        }),
+    );
+    const unbind = bindWorkspace({ createFollowup });
+    render(<BoundQueue />);
+    await waitFor(() => {
+      expect(confirmButton()).toBeEnabled();
+    });
+
+    await userEvent.setup().click(confirmButton());
+    expect(createFollowup).toHaveBeenCalledTimes(1);
+
+    notifyReviewWorkspace();
+    await waitFor(() => {
+      expect(confirmButton()).toHaveAttribute('data-confirmation-state', 'committing');
+    });
+    expect(confirmButton()).toBeDisabled();
+
+    await userEvent.setup().click(confirmButton());
+    expect(createFollowup).toHaveBeenCalledTimes(1);
+
+    finishCreate(CREATED);
+    await waitFor(() => {
+      expect(createFollowup).toHaveBeenCalledTimes(1);
+    });
+    unbind();
+  });
+
+  it('refreshes lost-privilege when session privileges change after mount', async () => {
+    let privileges: ReadonlySet<string> = new Set([USE_PRIVILEGE]);
+    const unbind = bindWorkspace({
+      getPrivileges: () => privileges,
+    });
+    render(<BoundQueue />);
+    await waitFor(() => {
+      expect(confirmButton()).toBeEnabled();
+    });
+
+    privileges = new Set();
+    notifyReviewWorkspace();
+    await expectDisabled('lost-privilege');
+    unbind();
+  });
+});
+
+function BoundQueue(): React.ReactElement {
+  const workspace = useReviewWorkspace();
+  return <ReviewQueue drafts={workspace.drafts} adapterId={workspace.adapterId} ports={workspace.ports} />;
+}
+
+function bindWorkspace(
+  overrides: {
+    createFollowup?: ConfirmationPorts['createFollowup'];
+    getPrivileges?: () => ReadonlySet<string>;
+  } = {},
+): () => void {
+  const store = new DraftStore({
+    userId: 'user-1',
+    now: () => new Date('2026-08-31T04:00:00.000Z'),
+    randomUUID: () => DRAFT.draftId,
+  });
+  store.stage({
+    patient: DRAFT.patient,
+    title: DRAFT.title,
+    rationale: DRAFT.rationale,
+    priority: DRAFT.priority,
+    dueAt: DRAFT.dueAt,
+    assignee: DRAFT.assignee,
+    sourceReference: DRAFT.sourceReference,
+  });
+
+  const adapter = {
+    id: 'openmrs',
+    getResult: () => Promise.resolve(SOURCE),
+    listFollowups: () => Promise.resolve([]),
+    createFollowup: overrides.createFollowup ?? (() => Promise.resolve(CREATED)),
+  } as unknown as EmrAdapter;
+
+  unbindWorkspace = bindReviewWorkspace({
+    getStore: () => store,
+    getAdapter: () => adapter,
+    getSession: () => ({ authenticated: true, userId: 'user-1' }),
+    getPrivileges: overrides.getPrivileges ?? (() => new Set([USE_PRIVILEGE])),
+  });
+  return unbindWorkspace;
+}
 
 function renderQueue(overrides: Partial<ConfirmationPorts> = {}) {
   const ports = stubPorts(overrides);
@@ -273,6 +539,8 @@ async function expectDisabled(reason: string): Promise<void> {
     expect(confirmButton()).toBeDisabled();
   });
   expect(confirmButton()).toHaveAttribute('data-disabled-reason', reason);
+  expect(screen.getByTestId('confirm-reason')).toHaveTextContent(DISABLED_COPY[reason] ?? reason);
+  expect(confirmButton()).toHaveAttribute('aria-describedby', 'confirm-reason-draft-ada-1');
 }
 
 function toConfirmed(input: ConfirmedFollowup | undefined): ConfirmedFollowup | undefined {

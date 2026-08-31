@@ -12,7 +12,7 @@ import {
 } from '@emr-webmcp/core';
 
 import {
-  createConfirmationController,
+  getOrCreateConfirmationController,
   type ConfirmationPorts,
 } from '../../../apps/openmrs-esm/src/review/confirmation-controller';
 import {
@@ -184,18 +184,19 @@ function renderQueue(): void {
   }
 }
 
+const ports: ConfirmationPorts = {
+  peek: (draftId) => store.peek(draftId),
+  consume: (draftId) => store.consume(draftId),
+  getResult: (resultId) => adapter.getResult(resultId),
+  listFollowups: (query) => adapter.listFollowups(query),
+  createFollowup: (input) => adapter.createFollowup(input),
+  isAuthenticated: () => session.authenticated && session.userId !== null,
+  hasUsePrivilege: () => privileges.has('emr-webmcp.use'),
+  isOnline: () => navigator.onLine,
+};
+
 function renderItem(draft: FollowupDraft): HTMLElement {
-  const ports: ConfirmationPorts = {
-    peek: (draftId) => store.peek(draftId),
-    consume: (draftId) => store.consume(draftId),
-    getResult: (resultId) => adapter.getResult(resultId),
-    listFollowups: (query) => adapter.listFollowups(query),
-    createFollowup: (input) => adapter.createFollowup(input),
-    isAuthenticated: () => session.authenticated && session.userId !== null,
-    hasUsePrivilege: () => privileges.has('emr-webmcp.use'),
-    isOnline: () => navigator.onLine,
-  };
-  const controller = createConfirmationController(ports);
+  const controller = getOrCreateConfirmationController(draft.draftId, ports);
 
   const item = document.createElement('article');
   item.dataset.testid = 'review-item';

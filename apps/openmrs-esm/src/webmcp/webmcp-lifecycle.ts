@@ -106,6 +106,7 @@ function runWebmcpLifecycle(): () => void {
       routeContext,
     });
     previousUserId = session.userId;
+    notifyReviewWorkspace();
   };
 
   const dropStore = (): void => {

@@ -50,7 +50,8 @@ test.describe('draft confirmation harness', () => {
     await expect(page.getByTestId('confirm-followup')).toBeEnabled();
 
     const button = page.getByTestId('confirm-followup');
-    await Promise.all([button.click(), button.click()]);
+    await button.click();
+    await button.click({ force: true });
 
     await expect.poll(() => page.evaluate(() => window.__harness.createdCount())).toBe(1);
     await expect(button).toHaveAttribute('data-confirmation-state', 'succeeded');

@@ -7,7 +7,7 @@ import type {
 } from '@emr-webmcp/core';
 
 export const UNLATCHED_LIMIT = 100;
-const FOLLOWUP_JOIN_LIMIT = 1000;
+export const FOLLOWUP_JOIN_LIMIT = 1000;
 
 const ACTIVE_LATCH_STATUSES: ReadonlySet<FollowupSummary['status']> = new Set([
   'not-started',
@@ -57,10 +57,11 @@ export async function findUnlatched(
   );
   const items = unlatched.slice(0, limit);
   const resultsTruncated = results.length >= UNLATCHED_LIMIT;
+  const followupsTruncated = followups.length >= FOLLOWUP_JOIN_LIMIT;
 
   return {
     items,
-    truncated: resultsTruncated || unlatched.length > items.length,
+    truncated: resultsTruncated || followupsTruncated || unlatched.length > items.length,
   };
 }
 

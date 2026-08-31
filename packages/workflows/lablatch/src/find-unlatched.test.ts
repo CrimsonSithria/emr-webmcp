@@ -6,9 +6,11 @@ import {
   type ResultSummary,
 } from '@emr-webmcp/core';
 import { createFixtureAdapter } from '@emr-webmcp/contract-fixture';
+import { createOpenmrsAdapter } from '@emr-webmcp/openmrs-adapter';
+import { createOpenmrsMswFetch, createOpenmrsMswStore } from '@emr-webmcp/openmrs-adapter/testing';
 import { describe, expect, it, vi } from 'vitest';
 
-import { UNLATCHED_LIMIT, findUnlatched } from './find-unlatched.js';
+import { FOLLOWUP_JOIN_LIMIT, UNLATCHED_LIMIT, findUnlatched } from './find-unlatched.js';
 
 const FIXTURE_NOW = new Date('2026-08-31T12:00:00.000Z');
 
@@ -21,6 +23,17 @@ const backends: Backend[] = [
   {
     name: 'fixture',
     makeAdapter: () => createFixtureAdapter({ now: () => FIXTURE_NOW }),
+  },
+  {
+    name: 'openmrs',
+    makeAdapter: () => {
+      const store = createOpenmrsMswStore();
+      return createOpenmrsAdapter({
+        fetch: createOpenmrsMswFetch(store),
+        now: () => FIXTURE_NOW,
+        getActivePatientId: () => store.activePatientId,
+      });
+    },
   },
 ];
 
@@ -108,6 +121,26 @@ describe.each(backends)('findUnlatched ($name)', ({ makeAdapter }) => {
     const result = await findUnlatched(adapter);
 
     expect(result.items).toHaveLength(UNLATCHED_LIMIT);
+    expect(result.truncated).toBe(true);
+  });
+
+  it('reports truncated when the follow-up join page is full', async () => {
+    const base = makeAdapter();
+    const extras = Array.from({ length: FOLLOWUP_JOIN_LIMIT }, (_, index) =>
+      followup({
+        id: `task-join-${String(index)}`,
+        patientId: 'patient-12',
+        display: 'Edsger Dijkstra',
+        sourceReference: `Observation/obs-join-${String(index)}`,
+        status: 'not-started',
+      }),
+    );
+    const adapter = withOverrides(base, {
+      listFollowups: (input) => Promise.resolve(extras.slice(0, Math.max(0, input.limit))),
+    });
+
+    const result = await findUnlatched(adapter);
+
     expect(result.truncated).toBe(true);
   });
 

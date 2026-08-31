@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { AdapterError } from './adapter-error.js';
 import { decodeCorrelation, encodeCorrelation } from './correlation-codec.js';
 
 const UUID = '550e8400-e29b-41d4-a716-446655440000';
@@ -36,20 +37,29 @@ describe('correlation codec', () => {
     expect(decodedFinal.rationale).toContain(MARKER);
   });
 
-  it('rejects a malformed source on encode and decode', () => {
-    expect(() => encodeCorrelation(RATIONALE, 'Patient/abc')).toThrow();
+  it('rejects a malformed source on encode and stays strict', () => {
+    expect(() => encodeCorrelation(RATIONALE, 'Patient/abc')).toThrow(AdapterError);
     expect(() => encodeCorrelation(RATIONALE, 'Observation/')).toThrow();
     expect(() => encodeCorrelation(RATIONALE, 'Observation/not a uuid')).toThrow();
     expect(() => encodeCorrelation(RATIONALE, 'obs-01')).toThrow();
     expect(() => encodeCorrelation(RATIONALE, 'Observation/foo/bar')).toThrow();
     expect(() => encodeCorrelation(RATIONALE, '')).toThrow();
+  });
 
-    expect(() => decodeCorrelation(`${RATIONALE}\n[emr-webmcp:v1 source=Patient/${UUID} workflow=lablatch]`)).toThrow();
-    expect(() => decodeCorrelation(`${RATIONALE}\n[emr-webmcp:v1 source=Observation/ workflow=lablatch]`)).toThrow();
-    expect(() =>
-      decodeCorrelation(`${RATIONALE}\n[emr-webmcp:v1 source=Observation/not a uuid workflow=lablatch]`),
-    ).toThrow();
-    expect(() => decodeCorrelation(`${RATIONALE}\n[emr-webmcp:v1 source=obs-01 workflow=lablatch]`)).toThrow();
+  it('decodes a marker-shaped invalid final line without a sourceReference', () => {
+    const invalids = [
+      `${RATIONALE}\n[emr-webmcp:v1 source=Patient/${UUID} workflow=lablatch]`,
+      `${RATIONALE}\n[emr-webmcp:v1 source=Observation/ workflow=lablatch]`,
+      `${RATIONALE}\n[emr-webmcp:v1 source=Observation/not a uuid workflow=lablatch]`,
+      `${RATIONALE}\n[emr-webmcp:v1 source=Observation/abc def workflow=lablatch]`,
+      `${RATIONALE}\n[emr-webmcp:v1 source=obs-01 workflow=lablatch]`,
+    ];
+
+    for (const text of invalids) {
+      const decoded = decodeCorrelation(text);
+      expect(decoded.sourceReference).toBeUndefined();
+      expect(decoded.rationale).toBe(text);
+    }
   });
 
   it('keeps preceding rationale opaque including clinical punctuation', () => {

@@ -7,7 +7,6 @@ export type OverdueRescueInput = {
   patientId?: string;
   assigneeId?: string;
   priority?: FollowupSummary['priority'];
-  overdueOnly?: boolean;
   limit?: number;
 };
 

@@ -1,11 +1,11 @@
-import type {
-  AssigneeSummary,
-  ConfirmedFollowup,
-  FollowupSummary,
-  PatientRef,
+import {
+  decodeCorrelation,
+  encodeCorrelation,
+  type AssigneeSummary,
+  type ConfirmedFollowup,
+  type FollowupSummary,
+  type PatientRef,
 } from '@emr-webmcp/core';
-
-import { decodeCorrelation, encodeCorrelation } from '@emr-webmcp/lablatch/correlation-codec';
 
 import { referenceId, type FhirCarePlan, type FhirReference } from '../transport/fhir-types.js';
 import type { RestProvider, RestRole } from '../transport/rest-types.js';

@@ -11,6 +11,8 @@ export type {
   PatientRef,
   ResultSummary,
 } from './contracts/dtos.js';
+export type { DecodedCorrelation } from './contracts/correlation-codec.js';
+export { decodeCorrelation, encodeCorrelation } from './contracts/correlation-codec.js';
 export type { AppointmentQuery, FollowupQuery, ResultQuery } from './contracts/queries.js';
 export type {
   PublicToolError,
