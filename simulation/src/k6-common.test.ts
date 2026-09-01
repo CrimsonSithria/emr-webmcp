@@ -62,7 +62,7 @@ describe('k6 adapter paths', () => {
     const { OPENMRS_PATHS, mixedClinicReads, readToolReads } = await loadCommon();
     expect(OPENMRS_PATHS).toEqual({
       patients: '/ws/rest/v1/patient',
-      appointments: '/ws/rest/v1/appointment',
+      appointments: '/ws/rest/v1/appointments',
       observations: '/ws/fhir2/R4/Observation',
       carePlans: '/ws/rest/v1/tasks/careplan',
     });
@@ -76,7 +76,7 @@ describe('k6 adapter paths', () => {
     expect(mixed).toEqual(
       expect.arrayContaining([
         expect.stringContaining('/ws/rest/v1/patient'),
-        expect.stringContaining('/ws/rest/v1/appointment'),
+        expect.stringContaining('/ws/rest/v1/appointments'),
         expect.stringContaining('/ws/fhir2/R4/Observation'),
         expect.stringContaining('/ws/rest/v1/tasks/careplan'),
       ]),
@@ -84,7 +84,7 @@ describe('k6 adapter paths', () => {
     expect(reads).toEqual(
       expect.arrayContaining([
         expect.stringContaining('/ws/rest/v1/patient'),
-        expect.stringContaining('/ws/rest/v1/appointment'),
+        expect.stringContaining('/ws/rest/v1/appointments'),
         expect.stringContaining('/ws/fhir2/R4/Observation'),
       ]),
     );
@@ -94,13 +94,13 @@ describe('k6 adapter paths', () => {
   it('overrides the live appointments path without changing the product table', async () => {
     (globalThis as { __ENV?: Record<string, string> }).__ENV = {
       VUS: '1',
-      OPENMRS_APPOINTMENTS_PATH: '/ws/rest/v1/appointments',
+      OPENMRS_APPOINTMENTS_PATH: '/ws/rest/v1/appointment',
     };
     const { OPENMRS_PATHS, mixedClinicReads } = await loadCommon();
-    expect(OPENMRS_PATHS.appointments).toBe('/ws/rest/v1/appointment');
+    expect(OPENMRS_PATHS.appointments).toBe('/ws/rest/v1/appointments');
     const mixed = mixedClinicReads('http://127.0.0.1:8080');
-    expect(mixed.some((url) => url.includes('/ws/rest/v1/appointments?'))).toBe(true);
-    expect(mixed.some((url) => url.includes('/ws/rest/v1/appointment?'))).toBe(false);
+    expect(mixed.some((url) => url.includes('/ws/rest/v1/appointment?'))).toBe(true);
+    expect(mixed.some((url) => url.includes('/ws/rest/v1/appointments?'))).toBe(false);
   });
 
   it('keeps script checks at HTTP 200 and uses the shared path table', () => {
