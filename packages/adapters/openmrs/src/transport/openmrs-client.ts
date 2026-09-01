@@ -24,7 +24,7 @@ export type OpenmrsFetch = (
 
 export const OPENMRS_PATHS = {
   patients: '/ws/rest/v1/patient',
-  appointments: '/ws/rest/v1/appointment',
+  appointments: '/ws/rest/v1/appointments',
   observations: '/ws/fhir2/R4/Observation',
   conditions: '/ws/fhir2/R4/Condition',
   allergies: '/ws/fhir2/R4/AllergyIntolerance',

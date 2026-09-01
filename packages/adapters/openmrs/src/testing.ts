@@ -350,7 +350,7 @@ export function createOpenmrsMswHandlers(store: OpenmrsMswStore): RequestHandler
       }
       return HttpResponse.json(match);
     }),
-    http.get('*/ws/rest/v1/appointment', ({ request }) => {
+    http.get('*/ws/rest/v1/appointments', ({ request }) => {
       const forced = forcedResponse(store);
       if (forced !== undefined) {
         return forced;

@@ -8,7 +8,7 @@ export const GATE = {
 
 export const OPENMRS_PATHS = {
   patients: '/ws/rest/v1/patient',
-  appointments: '/ws/rest/v1/appointment',
+  appointments: '/ws/rest/v1/appointments',
   observations: '/ws/fhir2/R4/Observation',
   carePlans: '/ws/rest/v1/tasks/careplan',
 };
