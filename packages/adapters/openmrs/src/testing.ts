@@ -327,9 +327,10 @@ export function createOpenmrsMswHandlers(store: OpenmrsMswStore): RequestHandler
       const url = new URL(request.url);
       const query = (url.searchParams.get('q') ?? '').trim().toLowerCase();
       const limit = readLimit(url.searchParams.get('limit'), 20);
+      // Real OpenMRS REST returns no patients for an empty query.
       const matches =
         query === ''
-          ? store.patients
+          ? []
           : store.patients.filter(
               (item) =>
                 item.uuid.toLowerCase().includes(query) ||
@@ -380,10 +381,22 @@ export function createOpenmrsMswHandlers(store: OpenmrsMswStore): RequestHandler
       }
       const url = new URL(request.url);
       const patientId = normalizeRef(url.searchParams.get('patient'));
-      if (patientId === '') {
-        return HttpResponse.json({ error: 'patient is required' }, { status: 400 });
-      }
       const category = url.searchParams.get('category');
+      if (patientId === '') {
+        // Only a bounded newest-first window may omit the patient.
+        if (url.searchParams.get('_sort') !== '-date') {
+          return HttpResponse.json({ error: 'patient is required' }, { status: 400 });
+        }
+        const count = readLimit(url.searchParams.get('_count'), 50);
+        const window = store.observations
+          .filter((item) => category === null || observationCategory(item) === category)
+          .sort((left, right) => observationTimeMs(right) - observationTimeMs(left))
+          .slice(0, count);
+        return HttpResponse.json({
+          resourceType: 'Bundle',
+          entry: window.map((resource) => ({ resource })),
+        });
+      }
       const matches = store.observations.filter((item) => {
         if (observationPatientId(item) !== patientId) {
           return false;
@@ -430,9 +443,10 @@ export function createOpenmrsMswHandlers(store: OpenmrsMswStore): RequestHandler
       if (forced !== undefined) {
         return forced;
       }
-      const patientId = normalizeRef(new URL(request.url).searchParams.get('patient'));
+      // The OpenMRS tasks module filters by `subject`; `patient` matches nothing.
+      const patientId = normalizeRef(new URL(request.url).searchParams.get('subject'));
       if (patientId === '') {
-        return HttpResponse.json({ error: 'patient is required' }, { status: 400 });
+        return HttpResponse.json({ resourceType: 'Bundle', total: 0, entry: [] });
       }
       const matches = store.carePlans.filter((item) => carePlanPatientId(item) === patientId);
       return HttpResponse.json({
@@ -701,6 +715,12 @@ function normalizeRef(value: string | null): string {
 
 function observationPatientId(resource: Record<string, unknown>): string {
   return resourcePatientId(resource);
+}
+
+function observationTimeMs(resource: Record<string, unknown>): number {
+  const effective = resource.effectiveDateTime;
+  const parsed = typeof effective === 'string' ? Date.parse(effective) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function observationCategory(resource: Record<string, unknown>): string {

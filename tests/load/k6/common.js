@@ -113,23 +113,31 @@ function loadPatientId() {
   return readEnv('OPENMRS_LOAD_PATIENT', SYNTHETIC_LOAD_PATIENT);
 }
 
+// Mirrors the adapter's real read shapes: a non-empty patient search (an empty `q`
+// returns nothing on OpenMRS), one newest-first clinic-wide lab window, patient-scoped
+// labs, and CarePlans filtered by `subject` (the tasks module ignores `patient`).
 export function mixedClinicReads(base) {
   const patient = loadPatientId();
   return [
-    openmrsUrl(base, OPENMRS_PATHS.patients, { q: '', limit: '20', v: 'default' }),
+    openmrsUrl(base, OPENMRS_PATHS.patients, { q: 'a', limit: '20', v: 'default' }),
     openmrsUrl(base, appointmentsPath(), { fromDate: LOAD_FROM_DATE, toDate: LOAD_TO_DATE }),
+    openmrsUrl(base, OPENMRS_PATHS.observations, {
+      category: 'laboratory',
+      _sort: '-date',
+      _count: '100',
+    }),
     openmrsUrl(base, OPENMRS_PATHS.observations, {
       patient,
       category: 'laboratory',
       _count: '20',
     }),
-    openmrsUrl(base, OPENMRS_PATHS.carePlans, { patient }),
+    openmrsUrl(base, OPENMRS_PATHS.carePlans, { subject: patient }),
   ];
 }
 
 export function readToolReads(base) {
   return [
-    openmrsUrl(base, OPENMRS_PATHS.patients, { q: '', limit: '20', v: 'default' }),
+    openmrsUrl(base, OPENMRS_PATHS.patients, { q: 'a', limit: '20', v: 'default' }),
     openmrsUrl(base, appointmentsPath(), { fromDate: LOAD_FROM_DATE, toDate: LOAD_TO_DATE }),
     openmrsUrl(base, OPENMRS_PATHS.observations, {
       patient: loadPatientId(),

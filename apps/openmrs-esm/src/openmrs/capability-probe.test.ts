@@ -75,7 +75,7 @@ describe('createDefaultCapabilityProbe', () => {
     expect(retained).toEqual(new Set(PHASE1_CAPABILITIES));
   });
 
-  it('always sends patient and a small limit on the CarePlan collection probe', async () => {
+  it('always sends subject and a small limit on the CarePlan collection probe', async () => {
     const fetch = vi.fn(async () => ({ status: 200, data: {} }));
     await createDefaultCapabilityProbe({
       fetch,
@@ -86,7 +86,7 @@ describe('createDefaultCapabilityProbe', () => {
     const path = firstFetchPath(fetch);
     const url = new URL(path, 'http://openmrs.local');
     expect(url.pathname).toBe('/ws/rest/v1/tasks/careplan');
-    expect(url.searchParams.get('patient')).toBe('capability-probe');
+    expect(url.searchParams.get('subject')).toBe('capability-probe');
     expect(url.searchParams.get('limit')).toBe('1');
   });
 
@@ -98,7 +98,7 @@ describe('createDefaultCapabilityProbe', () => {
       getPatientId: () => 'patient-ada',
     })();
 
-    expect(new URL(firstFetchPath(fetch), 'http://openmrs.local').searchParams.get('patient')).toBe(
+    expect(new URL(firstFetchPath(fetch), 'http://openmrs.local').searchParams.get('subject')).toBe(
       'patient-ada',
     );
   });

@@ -14,7 +14,9 @@ setup() {
   export EMR_WEBMCP_HEALTH_TIMEOUT="2"
   export EMR_WEBMCP_HEALTH_POLL="0"
   export EMR_WEBMCP_BIND_ADDRESS="127.0.0.1"
-  export EMR_WEBMCP_PORT="18080"
+  # A free port, so success-path tests do not depend on what the dev box has bound.
+  EMR_WEBMCP_PORT="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+  export EMR_WEBMCP_PORT
   export EMR_WEBMCP_STUB_DIR="${TEST_HOME}/stub"
   export EMR_WEBMCP_STUB_LOG="${TEST_HOME}/docker.log"
   mkdir -p "${TEST_HOME}/bin" "${EMR_WEBMCP_STUB_DIR}" "${EMR_WEBMCP_BACKUP_DIR}" "${EMR_WEBMCP_RUNTIME_DIR}"
@@ -93,6 +95,12 @@ if [[ "${joined}" == *" ps "* || "${joined}" == *" ps" || "${joined}" == "ps "* 
   printf '%s\n' "gateway ${health}"
   exit 0
 fi
+if [[ "${joined}" == *" port gateway "* ]]; then
+  if [[ -n "${STUB_GATEWAY_PUBLISHED:-}" ]]; then
+    printf '%s\n' "${STUB_GATEWAY_PUBLISHED}"
+  fi
+  exit 0
+fi
 if [[ "${joined}" == *pull* ]]; then
   exit "${STUB_PULL_EXIT:-0}"
 fi
@@ -114,13 +122,15 @@ write_fmt=""
 dump_headers=""
 method="GET"
 url=""
+basic_user=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -o|--output) out="$2"; shift 2 ;;
     -w|--write-out) write_fmt="$2"; shift 2 ;;
     -D|--dump-header) dump_headers="$2"; shift 2 ;;
     -X|--request) method="$2"; shift 2 ;;
-    -H|--header|-u|--user|-d|--data|--data-binary|--data-raw|--netrc-file) shift 2 ;;
+    -u|--user) basic_user="$2"; shift 2 ;;
+    -H|--header|-d|--data|--data-binary|--data-raw|--netrc-file) shift 2 ;;
     -s|-S|-f|-L|-k|-c|-b|--silent|--show-error|--fail|--location) shift ;;
     --data-binary|--data) shift 2 ;;
     -*) shift ;;
@@ -133,13 +143,21 @@ body=""
 code="200"
 headers="HTTP/1.1 200 OK\r\n"
 if [[ "${url}" == *routes.registry* || "${url}" == *routes.registry.json* ]]; then
-  body='{"@emr-webmcp/openmrs-esm":{"pages":[{"route":"emr-webmcp"}]}}'
+  body='{"routes":{"@emr-webmcp/openmrs-esm":{"pages":[{"route":"emr-webmcp"}]}}}'
 elif [[ "${url}" == *'/openmrs/spa'* && "${url}" != *importmap* && "${url}" != *routes* ]]; then
   body='<!doctype html><title>Login</title>'
 elif [[ "${url}" == *'/ws/rest/v1/session'* ]]; then
   if [[ "${method}" == "DELETE" ]]; then
     code="204"
     body=""
+  elif [[ -n "${basic_user}" ]]; then
+    # Explicit basic-auth probes (the stock-default check) are rejected unless
+    # a test opts into an insecure instance.
+    if [[ "${STUB_DEFAULT_ADMIN_ACCEPTED:-0}" == "1" ]]; then
+      body='{"authenticated":true,"user":{"uuid":"stock-admin"}}'
+    else
+      body='{"authenticated":false}'
+    fi
   else
     body='{"authenticated":true,"user":{"uuid":"synthetic-user"}}'
     headers="HTTP/1.1 200 OK\r\nSet-Cookie: JSESSIONID=secret-cookie-value; Path=/\r\n"
@@ -241,7 +259,9 @@ EOF
   _assert_redacted "${output}"
 }
 
-@test "preflight fails when the loopback port is occupied" {
+# Starts a loopback listener on a free port; exports EMR_WEBMCP_PORT to it and
+# leaves the listener pid in PORT_LISTENER_PID for teardown.
+_occupy_loopback_port() {
   local portfile="${TEST_HOME}/port"
   python3 - "${portfile}" <<'PY' &
 import socket, sys, time
@@ -250,9 +270,17 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sock.bind(("127.0.0.1", 0))
 open(path, "w", encoding="utf-8").write(str(sock.getsockname()[1]))
-sock.listen(1)
+sock.listen(8)
+sock.settimeout(0.5)
+deadline = time.time() + 30
 try:
-    time.sleep(30)
+    # Keep accepting so repeated probes all see a live listener.
+    while time.time() < deadline:
+        try:
+            conn, _ = sock.accept()
+            conn.close()
+        except socket.timeout:
+            pass
 finally:
     sock.close()
 PY
@@ -263,8 +291,28 @@ PY
   done
   export EMR_WEBMCP_PORT
   EMR_WEBMCP_PORT="$(cat "${portfile}")"
+}
+
+@test "preflight fails when the loopback port is occupied" {
+  _occupy_loopback_port
   run "${SCRIPTS_DIR}/preflight.sh"
   [ "${status}" -ne 0 ]
+  [[ "${output}" == *"loopback port is occupied"* ]]
+  _assert_redacted "${output}"
+}
+
+@test "preflight allows the loopback port when our own gateway publishes it" {
+  _occupy_loopback_port
+  export STUB_GATEWAY_PUBLISHED="127.0.0.1:${EMR_WEBMCP_PORT}"
+  run "${SCRIPTS_DIR}/preflight.sh"
+  [ "${status}" -eq 0 ]
+  grep -E 'port gateway 80$' "${EMR_WEBMCP_STUB_LOG}"
+
+  # A gateway publishing some other port does not excuse a foreign listener.
+  export STUB_GATEWAY_PUBLISHED="127.0.0.1:1"
+  run "${SCRIPTS_DIR}/preflight.sh"
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"loopback port is occupied"* ]]
   _assert_redacted "${output}"
 }
 
@@ -406,6 +454,7 @@ if not isinstance(data, list):
 needles = {
     "https": False,
     "login_page": False,
+    "default_admin_rejected": False,
     "synthetic_login": False,
     "fhir_capability": False,
     "import_map": False,
@@ -444,6 +493,35 @@ missing = [name for name, seen in needles.items() if not seen]
 if missing:
     raise SystemExit(f"missing checks: {missing}")
 PY
+}
+
+@test "verify-live fails when the instance still accepts the stock OpenMRS admin password" {
+  export STUB_DEFAULT_ADMIN_ACCEPTED="1"
+  run "${SCRIPTS_DIR}/verify-live.sh"
+  [ "${status}" -ne 0 ]
+  # The probe must run before any authenticated verification session exists.
+  ! grep -q 'POST .*/ws/rest/v1/session' "${EMR_WEBMCP_STUB_DIR}/http.state"
+  _assert_redacted "${output}"
+}
+
+@test "verify-live refuses an env whose login password is the stock OpenMRS default" {
+  cat >"${EMR_WEBMCP_ENV_FILE}" <<'EOF'
+EMR_WEBMCP_BIND_ADDRESS=127.0.0.1
+EMR_WEBMCP_PORT=18080
+OMRS_DB_USER=openmrs
+OMRS_DB_PASSWORD=generated-db-password-ok
+MYSQL_ROOT_PASSWORD=generated-root-password-ok
+OPENMRS_PUBLIC_HOSTNAME=demo.example.invalid
+SYNTHETIC_DATA_ACK=synthetic-demo-only
+OPENMRS_USERNAME=admin
+OPENMRS_PASSWORD=Admin123
+EOF
+  chmod 0600 "${EMR_WEBMCP_ENV_FILE}"
+  run "${SCRIPTS_DIR}/verify-live.sh"
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"stock default"* ]]
+  [[ ! -f "${EMR_WEBMCP_STUB_DIR}/http.state" ]]
+  _assert_redacted "${output}"
 }
 
 @test "scripts clean runtime files and never leave cookies or dumps behind" {

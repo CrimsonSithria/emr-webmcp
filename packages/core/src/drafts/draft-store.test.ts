@@ -178,7 +178,9 @@ function expectAdapterError(action: () => unknown, code: string): void {
   }
 }
 
-function fakeAdapter(): EmrAdapter {
+// `satisfies` keeps the EmrAdapter conformance check but infers property-typed mocks,
+// so `expect(adapter.method)` is not an unbound-method reference.
+function fakeAdapter() {
   return {
     id: 'spy',
     getCapabilities: vi.fn(() => Promise.reject(new Error('adapter must not be called'))),
@@ -192,5 +194,5 @@ function fakeAdapter(): EmrAdapter {
     listAssignees: vi.fn(() => Promise.reject(new Error('adapter must not be called'))),
     createFollowup: vi.fn(() => Promise.reject(new Error('adapter must not be called'))),
     navigate: vi.fn(() => Promise.reject(new Error('adapter must not be called'))),
-  };
+  } satisfies EmrAdapter;
 }

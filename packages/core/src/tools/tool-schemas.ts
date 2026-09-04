@@ -54,7 +54,7 @@ const zodSchemas = {
     limit: z.int().min(1).max(20),
   }),
   stage_followup_task: z.strictObject({
-    draftId: identifier,
+    draftId: identifier.optional(),
     patient: patientRef,
     title: titleText,
     rationale: rationaleText,

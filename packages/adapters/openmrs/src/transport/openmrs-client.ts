@@ -36,6 +36,7 @@ export const OPENMRS_PATHS = {
 
 const REMOTE_PAGE_SIZE = 50;
 const MAX_REMOTE_PAGES = 10;
+const RECENT_WINDOW_MAX = 100;
 const UPSTREAM_MESSAGE = 'Upstream request failed';
 
 export class OpenmrsClient {
@@ -45,17 +46,6 @@ export class OpenmrsClient {
     return this.collectRest<RestPatient>(
       withQuery(OPENMRS_PATHS.patients, {
         q: query,
-        limit: String(limit),
-        v: 'default',
-      }),
-      signal,
-    );
-  }
-
-  listPatients(limit: number, signal?: AbortSignal): Promise<RestPatient[]> {
-    return this.collectRest<RestPatient>(
-      withQuery(OPENMRS_PATHS.patients, {
-        q: '',
         limit: String(limit),
         v: 'default',
       }),
@@ -121,9 +111,33 @@ export class OpenmrsClient {
     );
   }
 
+  /**
+   * One bounded page of the newest observations across the clinic. This is the
+   * only unscoped read: the tasks module lists CarePlans per subject only, and
+   * REST patient search returns nothing for an empty query, so the clinic-wide
+   * default has to be anchored on recent results. Never follows next links.
+   */
+  searchRecentObservations(input: {
+    category: string;
+    count: number;
+    signal?: AbortSignal;
+  }): Promise<FhirObservation[]> {
+    const count = Math.max(1, Math.min(Math.floor(input.count), RECENT_WINDOW_MAX));
+    return this.requestList<FhirObservation>(
+      withQuery(OPENMRS_PATHS.observations, {
+        category: input.category,
+        _sort: '-date',
+        _count: String(count),
+      }),
+      bundleResources<FhirObservation>,
+      input.signal,
+    );
+  }
+
+  /** The OpenMRS tasks module filters CarePlans by `subject`; `patient` silently matches nothing. */
   listCarePlans(patientId: string, signal?: AbortSignal): Promise<FhirCarePlan[]> {
     return this.collectFhir<FhirCarePlan>(
-      withQuery(OPENMRS_PATHS.carePlans, { patient: patientId }),
+      withQuery(OPENMRS_PATHS.carePlans, { subject: patientId }),
       signal,
     );
   }

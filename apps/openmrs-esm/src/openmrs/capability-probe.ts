@@ -52,7 +52,8 @@ function probePatientId(getPatientId?: () => string | null): string {
 }
 
 function tasksProbePath(patientId: string): string {
-  const search = new URLSearchParams({ patient: patientId, limit: '1' });
+  // The tasks module filters CarePlans by `subject`, matching the adapter's reads.
+  const search = new URLSearchParams({ subject: patientId, limit: '1' });
   return `${TASKS_PATH}?${search.toString()}`;
 }
 

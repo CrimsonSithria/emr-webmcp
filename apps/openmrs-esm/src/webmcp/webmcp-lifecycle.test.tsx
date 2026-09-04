@@ -11,6 +11,7 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import EmrWebmcp from '../emr-webmcp.component';
+import { readAgentActivity, readConfirmedFollowup } from './agent-activity';
 import { startWebmcpLifecycle, stopWebmcpLifecycle } from './webmcp-lifecycle';
 
 type RegisteredTool = ModelContextTool & { unregister: () => void };
@@ -134,7 +135,7 @@ describe('WebMCP module lifecycle', () => {
       expect(model.names()).not.toContain('stage_followup_task');
       expect(model.names()).toContain('search_patients');
     });
-    expect(carePlanProbePaths().every((path) => new URL(path, 'http://openmrs.local').searchParams.has('patient'))).toBe(
+    expect(carePlanProbePaths().every((path) => new URL(path, 'http://openmrs.local').searchParams.has('subject'))).toBe(
       true,
     );
   });
@@ -168,12 +169,23 @@ describe('WebMCP module lifecycle', () => {
     const firstGeneration = [...model.tools];
     const unregisteredAfterReady = model.unregisterLog.length;
 
+    const staged = await invoke(model.tool('stage_followup_task'), {
+      patient: { id: 'patient-1', display: 'Ada Lovelace' },
+      title: 'Follow up potassium',
+      rationale: 'Repeat the BMP in clinic.',
+      priority: 'high',
+    });
+    expect(staged.ok).toBe(true);
+    expect(readAgentActivity()?.tool).toBe('stage_followup_task');
+
     authenticate('user-2');
 
     await waitFor(() => {
       expect(model.unregisterLog).toHaveLength(unregisteredAfterReady + 12);
       expect(model.names()).toEqual([...TOOL_NAMES]);
       expect(model.tools.some((tool) => firstGeneration.includes(tool))).toBe(false);
+      expect(readAgentActivity()).toBeNull();
+      expect(readConfirmedFollowup()).toBeNull();
     });
   });
 
@@ -238,6 +250,30 @@ describe('WebMCP module lifecycle', () => {
 
     expect(model.names()).toEqual([]);
     expect(model.unregisterLog).toHaveLength(unregisteredAfterReady + 12);
+  });
+
+  it('shows staged agent activity and the draft on the LabLatch page', async () => {
+    const model = installFakeModelContext();
+    mockProbe(200);
+    authenticate();
+    startWebmcpLifecycle();
+    await waitFor(() => {
+      expect(model.names()).toEqual([...TOOL_NAMES]);
+    });
+
+    const staged = await invoke(model.tool('stage_followup_task'), {
+      draftId: 'draft-1',
+      patient: { id: 'patient-1', display: 'Ada Lovelace' },
+      title: 'Follow up potassium',
+      rationale: 'Repeat the BMP in clinic.',
+      priority: 'high',
+    });
+    expect(staged.ok).toBe(true);
+
+    render(<EmrWebmcp />);
+    expect(screen.getByTestId('agent-activity-tool')).toHaveTextContent('Stage follow-up draft');
+    expect(screen.getByTestId('agent-activity-lines')).toHaveTextContent('Confirm follow-up is the only chart write');
+    expect(screen.getByTestId('review-item-title')).toHaveTextContent('Follow up potassium');
   });
 
   it('rechecks session inside handlers and never POSTs a CarePlan from stage_followup_task', async () => {

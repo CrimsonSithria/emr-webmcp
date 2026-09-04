@@ -89,6 +89,10 @@ describe('k6 adapter paths', () => {
       ]),
     );
     expect(mixed.some((url) => url.includes('patient='))).toBe(true);
+    expect(mixed.some((url) => url.includes('/ws/rest/v1/tasks/careplan?subject='))).toBe(true);
+    expect(mixed.some((url) => url.includes('/ws/rest/v1/tasks/careplan?patient='))).toBe(false);
+    expect(mixed.some((url) => url.includes('_sort=-date'))).toBe(true);
+    expect(all.some((url) => /\/ws\/rest\/v1\/patient\?q=(?:&|$)/.test(url))).toBe(false);
   });
 
   it('overrides the live appointments path without changing the product table', async () => {

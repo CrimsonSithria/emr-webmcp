@@ -159,7 +159,7 @@ describe('OpenmrsAdapter', () => {
       await expect(adapter.listAbnormalResults({ limit: 1, cursor: '' })).resolves.toHaveLength(1);
     });
 
-    it('fans out patient-scoped Observation reads and never omits patient', async () => {
+    it('scopes Observation reads to a patient or to one bounded newest-first window', async () => {
       const store = createOpenmrsMswStore();
       const fetch = vi.fn(createOpenmrsMswFetch(store));
       const adapter = createOpenmrsAdapter({
@@ -169,14 +169,71 @@ describe('OpenmrsAdapter', () => {
         getActivePatientId: () => store.activePatientId,
       });
 
-      await adapter.listAbnormalResults({ limit: 100 });
+      const clinicWide = await adapter.listAbnormalResults({ limit: 100 });
+      const clinicWideCalls = fetch.mock.calls.map(([path]) => path).filter(isObservationCollection);
       await adapter.listAbnormalResults({ limit: 100, patientId: 'patient-01' });
-
-      const collections = fetch.mock.calls
+      const patientCalls = fetch.mock.calls
         .map(([path]) => path)
-        .filter(isObservationCollection);
-      expect(collections.length).toBeGreaterThan(1);
-      expect(collections.every((path) => hasRequiredPatient(path))).toBe(true);
+        .filter(isObservationCollection)
+        .slice(clinicWideCalls.length);
+
+      expect(clinicWide.length).toBeGreaterThan(1);
+      expect(clinicWideCalls).toHaveLength(1);
+      const window = new URL(clinicWideCalls[0] ?? '', 'http://openmrs.local').searchParams;
+      expect(window.get('patient')).toBeNull();
+      expect(window.get('_sort')).toBe('-date');
+      expect(Number(window.get('_count'))).toBeLessThanOrEqual(100);
+      expect(patientCalls.length).toBeGreaterThan(0);
+      expect(patientCalls.every((path) => hasRequiredPatient(path))).toBe(true);
+    });
+
+    it('never lists patients with an empty REST query, which real OpenMRS answers with nothing', async () => {
+      const store = createOpenmrsMswStore();
+      const fetch = vi.fn(createOpenmrsMswFetch(store));
+      const adapter = createOpenmrsAdapter({
+        fetch,
+        now: () => NOW,
+        navigate: () => undefined,
+        getActivePatientId: () => store.activePatientId,
+      });
+
+      const results = await adapter.listAbnormalResults({ limit: 100 });
+      const followups = await adapter.listFollowups({ limit: 100 });
+
+      expect(results.length).toBeGreaterThan(0);
+      expect(followups.length).toBeGreaterThan(0);
+      expect(
+        fetch.mock.calls.some(([path]) => {
+          const url = new URL(path, 'http://openmrs.local');
+          return url.pathname === '/ws/rest/v1/patient' && (url.searchParams.get('q') ?? '') === '';
+        }),
+      ).toBe(false);
+    });
+
+    it('returns newest results first and keeps the follow-up join covering every returned patient', async () => {
+      const store = createOpenmrsMswStore();
+      const fetch = vi.fn(createOpenmrsMswFetch(store));
+      const adapter = createOpenmrsAdapter({
+        fetch,
+        now: () => NOW,
+        navigate: () => undefined,
+        getActivePatientId: () => store.activePatientId,
+      });
+
+      const results = await adapter.listAbnormalResults({ limit: 100 });
+      const observedAt = results.map((item) => Date.parse(item.observedAt));
+      expect(observedAt).toEqual([...observedAt].sort((left, right) => right - left));
+
+      await adapter.listFollowups({ limit: 1000 });
+      const joinedPatients = new Set(
+        fetch.mock.calls
+          .map(([path]) => path)
+          .filter(isCarePlanCollection)
+          .map((path) => new URL(path, 'http://openmrs.local').searchParams.get('subject')),
+      );
+      for (const item of results) {
+        expect(joinedPatients.has(item.patient.id)).toBe(true);
+      }
     });
   });
 
@@ -222,7 +279,7 @@ describe('OpenmrsAdapter', () => {
       });
     });
 
-    it('fans out patient-scoped CarePlan reads and never omits patient', async () => {
+    it('fans out CarePlan reads per subject and never omits it', async () => {
       const store = createOpenmrsMswStore();
       const fetch = vi.fn(createOpenmrsMswFetch(store));
       const adapter = createOpenmrsAdapter({
@@ -239,7 +296,7 @@ describe('OpenmrsAdapter', () => {
         .map(([path]) => path)
         .filter(isCarePlanCollection);
       expect(collections.length).toBeGreaterThan(1);
-      expect(collections.every((path) => hasRequiredPatient(path))).toBe(true);
+      expect(collections.every((path) => hasRequiredSubject(path))).toBe(true);
     });
 
     it('searches providers as people and roles as roles', async () => {
@@ -303,6 +360,36 @@ describe('OpenmrsAdapter', () => {
   });
 
   describe('pagination', () => {
+    it('strips /openmrs from REST next links so openmrsFetch does not double-prefix', async () => {
+      const fetch = vi.fn<OpenmrsFetch>((path) => {
+        if (path.startsWith('/openmrs/')) {
+          return Promise.resolve({ status: 404, data: { error: 'double-prefixed' } });
+        }
+        if (path.includes('startIndex=5')) {
+          return Promise.resolve({
+            status: 200,
+            data: { results: [{ uuid: 'patient-02', display: 'Second' }], links: [] },
+          });
+        }
+        return Promise.resolve({
+          status: 200,
+          data: {
+            results: [{ uuid: 'patient-01', display: 'First' }],
+            links: [{ rel: 'next', uri: '/openmrs/ws/rest/v1/patient?q=John&limit=5&v=default&startIndex=5' }],
+          },
+        });
+      });
+      const adapter = createOpenmrsAdapter({ fetch, now: () => NOW });
+
+      const patients = await adapter.searchPatients('John', 10);
+
+      expect(patients.map((patient) => patient.id)).toEqual(['patient-01', 'patient-02']);
+      expect(fetch.mock.calls.map(([path]) => path)).toEqual([
+        '/ws/rest/v1/patient?q=John&limit=10&v=default',
+        '/ws/rest/v1/patient?q=John&limit=5&v=default&startIndex=5',
+      ]);
+    });
+
     it('follows FHIR next links and still applies the local abnormal cap', async () => {
       const store = createOpenmrsMswStore();
       store.observationPageSize = 2;
@@ -413,6 +500,11 @@ function isCarePlanCollection(path: string): boolean {
 function hasRequiredPatient(path: string): boolean {
   const patient = new URL(path, 'http://openmrs.local').searchParams.get('patient');
   return typeof patient === 'string' && patient !== '';
+}
+
+function hasRequiredSubject(path: string): boolean {
+  const subject = new URL(path, 'http://openmrs.local').searchParams.get('subject');
+  return typeof subject === 'string' && subject !== '';
 }
 
 function makeAdapter(store = createOpenmrsMswStore()) {

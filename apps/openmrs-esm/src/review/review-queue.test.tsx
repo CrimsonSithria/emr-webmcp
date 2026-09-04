@@ -7,12 +7,13 @@ import {
   type FollowupSummary,
   type ResultSummary,
 } from '@emr-webmcp/core';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { USE_PRIVILEGE } from '../openmrs/adapter-factory';
+import { clearAgentActivity, recordConfirmedFollowup } from '../webmcp/agent-activity';
 import {
   createConfirmationController,
   resetConfirmationControllers,
@@ -65,13 +66,28 @@ const DISABLED_COPY: Record<string, string> = {
 let unbindWorkspace: (() => void) | null = null;
 
 afterEach(() => {
-  cleanup();
   unbindWorkspace?.();
   unbindWorkspace = null;
   resetConfirmationControllers();
+  clearAgentActivity();
+  Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
 });
 
 describe('ReviewQueue', () => {
+  it('explains an empty queue instead of rendering a blank section', () => {
+    render(<ReviewQueue drafts={[]} adapterId="openmrs" ports={stubPorts()} />);
+    expect(screen.getByTestId('review-queue-empty')).toHaveTextContent('Nothing to confirm yet');
+    expect(screen.queryByTestId('review-item')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('confirmed-followup')).not.toBeInTheDocument();
+  });
+
+  it('keeps a confirmed notice after the last draft leaves the queue', () => {
+    recordConfirmedFollowup({ patient: 'Ada Lovelace', title: 'Follow up potassium' });
+    render(<ReviewQueue drafts={[]} adapterId="openmrs" ports={stubPorts()} />);
+    expect(screen.getByTestId('confirmed-followup')).toHaveTextContent('Follow-up confirmed for Ada Lovelace');
+    expect(screen.getByTestId('review-queue-empty')).toBeInTheDocument();
+  });
+
   it('shows patient identity, source evidence, proposal, assignee, priority, due date, and provenance', async () => {
     renderQueue();
 
@@ -473,6 +489,21 @@ describe('review workspace controller lifetime', () => {
     await waitFor(() => {
       expect(createFollowup).toHaveBeenCalledTimes(1);
     });
+    unbind();
+  });
+
+  it('shows a confirmed notice after a successful workspace confirm empties the queue', async () => {
+    const unbind = bindWorkspace();
+    render(<BoundQueue />);
+    await waitFor(() => {
+      expect(confirmButton()).toBeEnabled();
+    });
+    await userEvent.setup().click(confirmButton());
+    await waitFor(() => {
+      expect(screen.getByTestId('confirmed-followup')).toHaveTextContent('Follow-up confirmed for Ada Lovelace');
+    });
+    expect(screen.getByTestId('review-queue-empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('review-item')).not.toBeInTheDocument();
     unbind();
   });
 

@@ -23,3 +23,42 @@
   color: var(--cds-text-secondary);
   line-height: 1.5;
 }
+
+.activity {
+  margin-top: layout.$spacing-06;
+  padding-top: layout.$spacing-05;
+  border-top: 1px solid var(--cds-border-subtle);
+}
+
+.activityHeading {
+  @include type.type-style('heading-01');
+  margin: 0 0 layout.$spacing-03;
+  color: var(--cds-text-primary);
+}
+
+.activityTitle {
+  @include type.type-style('heading-02');
+  margin: 0 0 layout.$spacing-02;
+  color: var(--cds-text-primary);
+}
+
+.activityPhase {
+  @include type.type-style('label-01');
+  margin: 0 0 layout.$spacing-03;
+  color: var(--cds-text-secondary);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.activityIdle {
+  @include type.type-style('body-01');
+  margin: 0;
+  color: var(--cds-text-secondary);
+}
+
+.activityLines {
+  @include type.type-style('body-01');
+  margin: 0;
+  padding-left: layout.$spacing-05;
+  color: var(--cds-text-primary);
+}

@@ -9,7 +9,7 @@ emr_load_env
 emr_require_deploy_secrets
 
 if emr_is_placeholder_secret "${OPENMRS_USERNAME:-}" || emr_is_placeholder_secret "${OPENMRS_PASSWORD:-}"; then
-  emr_die "synthetic login credentials are missing"
+  emr_die "synthetic login credentials are missing or are the OpenMRS stock default"
 fi
 
 runtime="$(emr_runtime_dir)"
@@ -66,6 +66,14 @@ emr_http() {
   printf '%s' "${raw//[$'\t\r\n ']/}"
 }
 
+# Basic-auth probe that never touches the verification session's cookie jar.
+emr_http_basic() {
+  local user_pass="$1" path="$2"
+  local raw
+  raw="$(curl -sS -o "${body_file}" -w '%{http_code}' -D "${header_file}" -u "${user_pass}" -H "Accept: application/json" "https://${host}${path}")"
+  printf '%s' "${raw//[$'\t\r\n ']/}"
+}
+
 emr_duration() {
   local started="$1" now delta
   now="$(emr_now_ms)"
@@ -94,6 +102,30 @@ if [[ "${code}" != 2* ]]; then
   emr_fail_check "login_page" "${started}" "${code}"
 fi
 emr_record "status=pass" "toolName=login_page" "httpClass=$(emr_http_class "${code}")" "duration=$(emr_duration "${started}")"
+
+# The reference application ships admin/Admin123; a public demo must reject it.
+started="$(emr_now_ms)"
+code="$(emr_http_basic "admin:Admin123" /openmrs/ws/rest/v1/session)"
+default_rejected=0
+if [[ "${code}" == 401 ]]; then
+  default_rejected=1
+elif [[ "${code}" == 2* ]] && python3 - "${body_file}" <<'PY'
+import json
+import sys
+
+try:
+    data = json.loads(open(sys.argv[1], encoding="utf-8").read() or "{}")
+except json.JSONDecodeError:
+    raise SystemExit(1)
+raise SystemExit(0 if isinstance(data, dict) and data.get("authenticated") is False else 1)
+PY
+then
+  default_rejected=1
+fi
+if [[ "${default_rejected}" -ne 1 ]]; then
+  emr_fail_check "default_admin_rejected" "${started}" "${code}"
+fi
+emr_record "status=pass" "toolName=default_admin_rejected" "httpClass=$(emr_http_class "${code}")" "duration=$(emr_duration "${started}")"
 
 started="$(emr_now_ms)"
 python3 - "${payload_file}" <<'PY'
@@ -158,22 +190,34 @@ def load(path):
     except json.JSONDecodeError:
         return None
 
+def route_table(data):
+    if not isinstance(data, dict):
+        return {}
+    nested = data.get("routes")
+    if isinstance(nested, dict):
+        return nested
+    return data
+
 count = 0
+page_count = 0
 imap_code, routes_code = sys.argv[2], sys.argv[4]
 imap = load(sys.argv[1])
 if imap_code.startswith("2") and isinstance(imap, dict) and isinstance(imap.get("imports"), dict):
     count += sum(1 for name in imap["imports"] if isinstance(name, str) and "emr-webmcp" in name)
 routes = load(sys.argv[3])
 if routes_code.startswith("2") and isinstance(routes, dict):
-    for name, spec in routes.items():
+    table = route_table(routes)
+    for name, spec in table.items():
         if not isinstance(name, str) or "emr-webmcp" not in name:
             continue
         count += 1
         if isinstance(spec, dict):
             pages = spec.get("pages")
             if isinstance(pages, list):
-                count += sum(1 for page in pages if isinstance(page, dict) and page.get("route"))
-if count < 1:
+                found = sum(1 for page in pages if isinstance(page, dict) and page.get("route"))
+                page_count += found
+                count += found
+if page_count < 1:
     raise SystemExit(1)
 print(count)
 PY

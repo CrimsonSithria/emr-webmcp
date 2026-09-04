@@ -39,6 +39,7 @@ const ALL_CAPABILITIES: readonly EmrCapability[] = [
 
 const SEARCH_LIMIT = 20;
 const ABNORMAL_LIMIT = 100;
+const RECENT_RESULTS_WINDOW = 100;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type { OpenmrsFetch };
@@ -180,20 +181,17 @@ class OpenmrsAdapter implements EmrAdapter {
   async listAbnormalResults(input: ResultQuery): Promise<ResultSummary[]> {
     rejectUnsupportedCursor(input.cursor);
     const cap = Math.max(0, Math.min(input.limit, ABNORMAL_LIMIT));
-    const patientIds = await this.resolvePatientIds(input.patientId);
-    const matches: ResultSummary[] = [];
-    for (const patientId of patientIds) {
-      if (matches.length >= cap) {
-        break;
-      }
-      const raw = await this.client.searchObservations(this.observationQuery('laboratory', patientId));
-      matches.push(
-        ...present(raw.map(mapObservation)).filter(
-          (item) => item.interpretation !== 'normal' && item.interpretation !== 'unknown',
-        ),
-      );
-    }
-    return matches.slice(0, cap);
+    const results =
+      input.patientId === undefined
+        ? (await this.recentLabInbox()).results
+        : present(
+            (
+              await this.client.searchObservations(
+                this.observationQuery('laboratory', input.patientId),
+              )
+            ).map(mapObservation),
+          );
+    return results.filter(isAbnormal).slice(0, cap);
   }
 
   async getResult(resultId: string): Promise<ResultSummary> {
@@ -211,7 +209,10 @@ class OpenmrsAdapter implements EmrAdapter {
   async listFollowups(input: FollowupQuery): Promise<FollowupSummary[]> {
     rejectUnsupportedCursor(input.cursor);
     const cap = Math.max(0, input.limit);
-    const patientIds = await this.resolvePatientIds(input.patientId);
+    const patientIds =
+      input.patientId === undefined
+        ? (await this.recentLabInbox()).patientIds
+        : [input.patientId];
     const nowMs = this.now().getTime();
     const matches: FollowupSummary[] = [];
     for (const patientId of patientIds) {
@@ -308,14 +309,35 @@ class OpenmrsAdapter implements EmrAdapter {
     return query;
   }
 
-  private async resolvePatientIds(patientId?: string): Promise<string[]> {
-    if (patientId !== undefined) {
-      return [patientId];
+  /**
+   * Clinic-wide scope when no patient is given. OpenMRS REST patient search
+   * returns nothing for an empty query and the tasks module only lists
+   * CarePlans per subject, so "any N patients" is not available. Instead the
+   * inbox is the newest laboratory results, narrowed to the first SEARCH_LIMIT
+   * distinct patients so the follow-up join stays bounded and covers every
+   * result it returns.
+   */
+  private async recentLabInbox(): Promise<{ results: ResultSummary[]; patientIds: string[] }> {
+    const query: { category: string; count: number; signal?: AbortSignal } = {
+      category: 'laboratory',
+      count: RECENT_RESULTS_WINDOW,
+    };
+    if (this.signal !== undefined) {
+      query.signal = this.signal;
     }
-    const raw = await this.client.listPatients(SEARCH_LIMIT, this.signal);
-    return present(raw.map(mapPatient))
-      .map((patient) => patient.id)
-      .slice(0, SEARCH_LIMIT);
+    const mapped = present((await this.client.searchRecentObservations(query)).map(mapObservation));
+    const patientIds: string[] = [];
+    for (const item of mapped) {
+      if (patientIds.includes(item.patient.id)) {
+        continue;
+      }
+      if (patientIds.length >= SEARCH_LIMIT) {
+        break;
+      }
+      patientIds.push(item.patient.id);
+    }
+    const inScope = new Set(patientIds);
+    return { results: mapped.filter((item) => inScope.has(item.patient.id)), patientIds };
   }
 
   private async requirePatient(patientId: string): Promise<PatientRef> {
@@ -382,6 +404,10 @@ function assertValidTarget(target: EmrNavigationTarget): void {
 
 function present<T>(values: Array<T | undefined>): T[] {
   return values.filter((value): value is T => value !== undefined);
+}
+
+function isAbnormal(item: ResultSummary): boolean {
+  return item.interpretation !== 'normal' && item.interpretation !== 'unknown';
 }
 
 function rejectUnsupportedCursor(cursor: string | undefined): void {

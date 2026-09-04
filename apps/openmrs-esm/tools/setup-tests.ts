@@ -6,6 +6,20 @@ import { vi } from 'vitest';
 // here so route-aware components can be rendered in tests.
 (window as unknown as { getOpenmrsSpaBase: () => string }).getOpenmrsSpaBase = () => '/openmrs/spa/';
 
+// Node 25+ defines an inert `localStorage`/`sessionStorage` accessor (undefined unless
+// --localstorage-file is passed) that vitest's jsdom environment does not override, and
+// @openmrs/esm-feature-flags enumerates localStorage at import time. Borrow the real
+// jsdom Storage in that case; on the pinned Node 22 both are already jsdom's.
+const jsdomWindow = (globalThis as { jsdom?: { window: Window } }).jsdom?.window;
+if (jsdomWindow !== undefined) {
+  for (const key of ['localStorage', 'sessionStorage'] as const) {
+    const current = (globalThis as Record<string, unknown>)[key];
+    if (typeof current !== 'object' || current === null) {
+      Object.defineProperty(globalThis, key, { value: jsdomWindow[key], configurable: true, writable: true });
+    }
+  }
+}
+
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
 window.HTMLFormElement.prototype.requestSubmit = vi.fn();
 window.matchMedia = vi.fn().mockImplementation(() => ({

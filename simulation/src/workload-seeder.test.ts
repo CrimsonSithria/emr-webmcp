@@ -10,7 +10,7 @@ import {
   scaleWorkloadCount,
   workloadIdempotencyKey,
 } from './workload-plan.js';
-import { seedWorkload } from './workload-seeder.js';
+import { APPOINTMENT_SEED_KINDS, seedWorkload } from './workload-seeder.js';
 
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -118,6 +118,19 @@ describe('clinic workload plan', () => {
     expect(first.observations).toHaveLength(1000);
     expect(first.observations.filter((row) => row.unlatched)).toHaveLength(150);
     expect(first.edgeCases).toHaveLength(100);
+  });
+
+  it('uses varied LOINC codes and spread timestamps instead of one hemoglobin stamp', () => {
+    const plan = buildWorkloadPlan({
+      profileId: 'clinic',
+      runId: 'emr-webmcp-clinic-testrun',
+      patientIds: clinicPatients(),
+    });
+    const loincs = new Set(plan.observations.map((row) => row.loincCode));
+    const timestamps = new Set(plan.observations.map((row) => row.effectiveDateTime));
+    expect(loincs.size).toBeGreaterThanOrEqual(4);
+    expect(timestamps.size).toBeGreaterThan(20);
+    expect(plan.observations.every((row) => row.displayName.length > 0 && row.unit.length > 0)).toBe(true);
   });
 
   it('keeps every patient reference inside the imported manifest', () => {
@@ -275,6 +288,12 @@ describe('seedWorkload', () => {
       observations: 0,
       edgeCases: 0,
     });
+    expect(first.skipped).toEqual({
+      appointments: 0,
+      followUps: 0,
+      observations: 0,
+      edgeCases: 0,
+    });
     const afterFirst = client.snapshotCounts();
 
     const second = await seedWorkload({ plan, client });
@@ -289,6 +308,43 @@ describe('seedWorkload', () => {
     expect(client.createCalls).toBe(
       first.created.appointments + first.created.followUps + first.created.observations + first.created.edgeCases,
     );
+  });
+
+  it('can seed appointments without touching labs or follow-ups', async () => {
+    const patientIds = syntheticPatientIds(25);
+    const plan = buildWorkloadPlan({
+      profileId: 'smoke',
+      runId: 'emr-webmcp-smoke-testrun',
+      patientIds,
+    });
+    const client = createMemoryAdminClient();
+
+    const result = await seedWorkload({ plan, client, kinds: APPOINTMENT_SEED_KINDS });
+    expect(result.created).toEqual({
+      appointments: 25,
+      followUps: 0,
+      observations: 0,
+      edgeCases: 0,
+    });
+    expect(result.reused).toEqual({
+      appointments: 0,
+      followUps: 0,
+      observations: 0,
+      edgeCases: 0,
+    });
+    expect(result.skipped).toEqual({
+      appointments: 0,
+      followUps: 0,
+      observations: 0,
+      edgeCases: 0,
+    });
+    expect(client.snapshotCounts()).toEqual({
+      appointments: 25,
+      followUps: 0,
+      observations: 0,
+      edgeCases: 0,
+    });
+    expect(client.createCalls).toBe(25);
   });
 
   it('exposes admin errors as status and code only', () => {

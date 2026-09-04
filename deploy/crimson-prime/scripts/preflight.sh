@@ -36,7 +36,7 @@ fi
 if emr_port_forbidden "${port}"; then
   emr_die "refusing host bind on 80 or 443"
 fi
-if emr_port_in_use "${bind}" "${port}"; then
+if emr_port_in_use "${bind}" "${port}" && ! emr_port_owned_by_stack "${bind}" "${port}"; then
   emr_die "loopback port is occupied"
 fi
 

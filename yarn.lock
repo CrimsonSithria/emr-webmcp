@@ -629,7 +629,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@emr-webmcp/lablatch@workspace:packages/workflows/lablatch":
+"@emr-webmcp/lablatch@workspace:^, @emr-webmcp/lablatch@workspace:packages/workflows/lablatch":
   version: 0.0.0-use.local
   resolution: "@emr-webmcp/lablatch@workspace:packages/workflows/lablatch"
   dependencies:
@@ -655,6 +655,7 @@ __metadata:
   dependencies:
     "@carbon/react": "npm:^1.83.0"
     "@emr-webmcp/core": "workspace:^"
+    "@emr-webmcp/lablatch": "workspace:^"
     "@emr-webmcp/openmrs-adapter": "workspace:^"
     "@openmrs/eslint-config": "npm:^2.0.0"
     "@openmrs/esm-framework": "npm:next"

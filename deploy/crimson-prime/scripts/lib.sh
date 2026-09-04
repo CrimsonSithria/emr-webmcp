@@ -83,9 +83,10 @@ emr_assert_mode_0600() {
   fi
 }
 
+# Admin123 is the OpenMRS reference application's shipped admin password.
 emr_is_placeholder_secret() {
   case "$1" in
-    "" | change-me | password | root | openmrs) return 0 ;;
+    "" | change-me | password | root | openmrs | Admin123) return 0 ;;
   esac
   return 1
 }
@@ -189,6 +190,15 @@ else:
 finally:
     sock.close()
 PY
+}
+
+# True when this compose project's own gateway is what publishes addr:port, so a
+# redeploy of a running stack is not mistaken for a foreign listener.
+emr_port_owned_by_stack() {
+  local addr="$1" port="$2" published
+  published="$(emr_compose port gateway 80 2>/dev/null | tr -d '[:space:]' || true)"
+  [[ -n "${published}" ]] || return 1
+  [[ "${published}" == "${addr}:${port}" || "${published}" == "[${addr}]:${port}" ]]
 }
 
 emr_disk_available_kb() {
