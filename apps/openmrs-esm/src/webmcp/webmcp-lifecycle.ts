@@ -10,6 +10,7 @@ import {
 import { createDefaultCapabilityProbe } from '../openmrs/capability-probe';
 import { bindReviewWorkspace, notifyReviewWorkspace } from '../review/review-workspace';
 import { getDocumentModelContext } from './document-model-context';
+import { clearAgentActivity, withAgentActivity } from './agent-activity';
 import { createSessionCheckedRuntime, type SessionSnapshot } from './use-webmcp-registration';
 
 type SessionStoreState = {
@@ -28,10 +29,12 @@ export function startWebmcpLifecycle(): void {
 
 export function stopWebmcpLifecycle(): void {
   if (stop === null) {
+    clearAgentActivity();
     return;
   }
   stop();
   stop = null;
+  clearAgentActivity();
 }
 
 function runWebmcpLifecycle(): () => void {
@@ -51,18 +54,20 @@ function runWebmcpLifecycle(): () => void {
   let previousUserId: string | null = null;
   let probeGeneration = 0;
 
-  const runtime = createSessionCheckedRuntime({
-    getAdapter: () => adapter,
-    getSession: () => session,
-    getPrivileges: () => privileges,
-    getDraftStore: () => {
-      if (draftStore === null) {
-        throw unauthorizedStore();
-      }
-      return draftStore;
-    },
-    onDraftsChanged: notifyReviewWorkspace,
-  });
+  const runtime = withAgentActivity(
+    createSessionCheckedRuntime({
+      getAdapter: () => adapter,
+      getSession: () => session,
+      getPrivileges: () => privileges,
+      getDraftStore: () => {
+        if (draftStore === null) {
+          throw unauthorizedStore();
+        }
+        return draftStore;
+      },
+      onDraftsChanged: notifyReviewWorkspace,
+    }),
+  );
 
   const model = getDocumentModelContext();
   const manager =
@@ -97,6 +102,7 @@ function runWebmcpLifecycle(): () => void {
     } else if (previousUserId !== null && previousUserId !== session.userId) {
       manager.userChange();
       draftStore.userChange(session.userId);
+      clearAgentActivity();
       notifyReviewWorkspace();
     }
     manager.update({
@@ -115,6 +121,7 @@ function runWebmcpLifecycle(): () => void {
     }
     draftStore.logout();
     draftStore = null;
+    clearAgentActivity();
     notifyReviewWorkspace();
   };
 

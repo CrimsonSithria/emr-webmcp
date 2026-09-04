@@ -51,26 +51,27 @@ export const ReviewItem: React.FC<ReviewItemProps> = ({ draft, adapterId, ports 
 
   return (
     <article className={styles.item} data-testid="review-item" data-draft-id={draft.draftId}>
+      <p className={styles.itemEyebrow}>{t('reviewItemEyebrow', 'Staged by the agent — not in the chart yet')}</p>
       <p className={styles.field} data-testid="review-item-patient">
-        {draft.patient.display} ({draft.patient.id})
+        {t('reviewItemPatient', 'Patient')}: {draft.patient.display} ({draft.patient.id})
       </p>
       <p className={styles.field} data-testid="review-item-source">
-        {draft.sourceReference ?? t('noSourceEvidence', 'No source evidence')}
+        {t('reviewItemSource', 'Source')}: {draft.sourceReference ?? t('noSourceEvidence', 'No source evidence')}
       </p>
       <p className={styles.field} data-testid="review-item-title">
-        {draft.title}
+        {t('reviewItemTitle', 'Proposed follow-up')}: {draft.title}
       </p>
       <p className={styles.field} data-testid="review-item-rationale">
-        {draft.rationale}
+        {t('reviewItemRationale', 'Why')}: {draft.rationale}
       </p>
       <p className={styles.field} data-testid="review-item-assignee">
-        {draft.assignee?.display ?? t('unassigned', 'Unassigned')}
+        {t('reviewItemAssignee', 'Assignee')}: {draft.assignee?.display ?? t('unassigned', 'Unassigned')}
       </p>
       <p className={styles.field} data-testid="review-item-priority">
-        {draft.priority}
+        {t('reviewItemPriority', 'Priority')}: {draft.priority}
       </p>
       <p className={styles.field} data-testid="review-item-due-at">
-        {draft.dueAt ?? t('noDueDate', 'No due date')}
+        {t('reviewItemDue', 'Due')}: {draft.dueAt ?? t('noDueDate', 'No due date')}
       </p>
       <p className={styles.field} data-testid="review-item-provenance">
         emr-webmcp / {adapterId}

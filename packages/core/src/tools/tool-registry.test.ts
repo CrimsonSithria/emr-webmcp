@@ -124,7 +124,7 @@ const TOOL_CASES: readonly ToolCase[] = [
     requiredCapabilities: ['create-followup'],
     description:
       'Validates and stores one transient `FollowupDraft`; it does not call the EMR write endpoint.',
-    required: ['draftId', 'patient', 'title', 'rationale', 'priority'],
+    required: ['patient', 'title', 'rationale', 'priority'],
     stringMax: { draftId: 200, title: 200, rationale: 2000, sourceReference: 200 },
     dateTime: ['dueAt'],
   },

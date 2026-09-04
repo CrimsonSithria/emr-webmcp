@@ -1,10 +1,17 @@
 import type { ModelContext, ModelContextTool } from '@emr-webmcp/core';
 
+export type HostExecuteOptions = {
+  signal?: AbortSignal;
+};
+
 export type HostModelContextTool = {
   name: string;
   description: string;
   inputSchema: object;
-  execute: (input: unknown, signal?: AbortSignal) => Promise<unknown>;
+  execute: (
+    input: unknown,
+    signalOrOptions?: AbortSignal | HostExecuteOptions,
+  ) => Promise<unknown>;
 };
 
 export type HostModelContext = {
@@ -17,6 +24,9 @@ export type HostModelContext = {
 
 declare global {
   interface Document {
+    modelContext?: HostModelContext;
+  }
+  interface Navigator {
     modelContext?: HostModelContext;
   }
 }
@@ -33,6 +43,19 @@ export function getDocumentModelContext(): ModelContext | null {
   return createDocumentModelContext(host);
 }
 
+export function hostExecuteSignal(second: unknown): AbortSignal | undefined {
+  if (second instanceof AbortSignal) {
+    return second;
+  }
+  if (typeof second === 'object' && second !== null && 'signal' in second) {
+    const signal = (second as { signal?: unknown }).signal;
+    if (signal instanceof AbortSignal) {
+      return signal;
+    }
+  }
+  return undefined;
+}
+
 export function createDocumentModelContext(host: HostModelContext): ModelContext {
   return {
     registerTool(tool: ModelContextTool): { unregister: () => void } {
@@ -42,10 +65,13 @@ export function createDocumentModelContext(host: HostModelContext): ModelContext
           name: tool.name,
           description: tool.description,
           inputSchema: tool.inputSchema,
-          execute: (input, signal) => tool.execute(input, signal ?? controller.signal),
+          execute: (input, second) =>
+            tool.execute(input, hostExecuteSignal(second) ?? controller.signal),
         },
         { signal: controller.signal },
       );
+
+      void Promise.resolve(result).catch(() => undefined);
 
       return {
         unregister: () => {
@@ -63,19 +89,30 @@ export function createDocumentModelContext(host: HostModelContext): ModelContext
   };
 }
 
-function getHostModelContext(): HostModelContext | null {
-  const host = document.modelContext;
-  if (host === undefined || typeof host.registerTool !== 'function') {
-    return null;
+export function getHostModelContext(): HostModelContext | null {
+  // Chrome 146-151 shipped the API on navigator; 152+ moved it to document.
+  const candidates: (HostModelContext | undefined)[] = [
+    document.modelContext,
+    typeof navigator === 'undefined' ? undefined : navigator.modelContext,
+  ];
+  for (const host of candidates) {
+    if (host !== undefined && host !== null && typeof host.registerTool === 'function') {
+      return host;
+    }
   }
-  return host;
+  return null;
 }
 
 function hasUnregister(result: unknown): result is { unregister: () => void } {
   return (
     typeof result === 'object' &&
     result !== null &&
+    !isThenable(result) &&
     'unregister' in result &&
     typeof result.unregister === 'function'
   );
+}
+
+function isThenable(value: object): boolean {
+  return 'then' in value && typeof (value as { then?: unknown }).then === 'function';
 }

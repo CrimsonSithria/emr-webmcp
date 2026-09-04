@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
 
+import {
+  observationEffectiveDateTime,
+  observationValue,
+  syntheticLabAt,
+} from './lab-catalog.js';
 import type { SimulationManifest } from './manifest.js';
 import type { ProfileId } from './profile-schema.js';
 
@@ -18,6 +23,10 @@ const PATIENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const FILE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const APPOINTMENT_WINDOW_START_MS = Date.parse('2026-08-31T08:00:00.000Z');
 const IDEMPOTENCY_SYSTEM = 'https://emr-webmcp.dev/idempotency';
+
+/** Adapter list window covering the seeded clinic week (`fromDate` / `toDate`). */
+export const APPOINTMENT_LIST_FROM_DATE = '2026-08-31T00:00:00.000Z';
+export const APPOINTMENT_LIST_TO_DATE = '2026-09-07T23:59:59.999Z';
 
 export const WORKLOAD_IDEMPOTENCY_SYSTEM = IDEMPOTENCY_SYSTEM;
 
@@ -54,6 +63,11 @@ export type PlannedObservation = {
   plannedResourceId: string;
   interpretation: LabInterpretation;
   unlatched: boolean;
+  loincCode: string;
+  displayName: string;
+  unit: string;
+  value: number;
+  effectiveDateTime: string;
 };
 
 export type PlannedFollowup = {
@@ -237,14 +251,21 @@ function buildObservations(
   for (let ordinal = 0; ordinal < counts.laboratoryObservations; ordinal += 1) {
     const unlatched = ordinal < counts.unlatchedAbnormal;
     const idempotencyKey = workloadIdempotencyKey(runId, 'observation', ordinal);
+    const lab = syntheticLabAt(ordinal);
+    const interpretation = observationInterpretation(ordinal, unlatched);
     observations.push({
       kind: 'observation',
       ordinal,
       patientId: patientAt(patientIds, ordinal),
       idempotencyKey,
       plannedResourceId: resourceIdFromKey(idempotencyKey),
-      interpretation: observationInterpretation(ordinal, unlatched),
+      interpretation,
       unlatched,
+      loincCode: lab.loinc,
+      displayName: lab.display,
+      unit: lab.unit,
+      value: observationValue(lab, interpretation, ordinal),
+      effectiveDateTime: observationEffectiveDateTime(ordinal, APPOINTMENT_WINDOW_START_MS),
     });
   }
   return observations;

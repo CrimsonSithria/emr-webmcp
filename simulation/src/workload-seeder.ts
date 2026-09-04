@@ -6,7 +6,11 @@ import {
   createOpenMrsAdminClientFromEnv,
   OpenMrsAdminError,
   type OpenMrsAdminClient,
+  type SeededKind,
 } from './openmrs-admin-client.js';
+
+/** Seed only the clinic list. Use this after a full seed so FHIR identifier 400s do not duplicate labs. */
+export const APPOINTMENT_SEED_KINDS: readonly SeededKind[] = ['appointment'];
 import { loadProfile, type ProfileId } from './profile-schema.js';
 import {
   buildWorkloadPlan,
@@ -26,75 +30,103 @@ export type SeedCounts = {
 export type SeedResult = {
   created: SeedCounts;
   reused: SeedCounts;
+  skipped: SeedCounts;
   plan: WorkloadPlan;
 };
 
 export async function seedWorkload(options: {
   plan: WorkloadPlan;
   client: OpenMrsAdminClient;
+  kinds?: readonly SeededKind[];
 }): Promise<SeedResult> {
   const created = emptyCounts();
   const reused = emptyCounts();
+  const skipped = emptyCounts();
+  const kinds = options.kinds;
 
-  for (const row of options.plan.observations) {
-    if ((await options.client.findByIdempotencyKey(row.idempotencyKey)) !== undefined) {
-      reused.observations += 1;
-      continue;
-    }
-    await options.client.createObservation({
-      idempotencyKey: row.idempotencyKey,
-      patientId: row.patientId,
-      plannedResourceId: row.plannedResourceId,
-      interpretation: row.interpretation,
-      unlatched: row.unlatched,
-    });
-    created.observations += 1;
-  }
-
-  for (const row of options.plan.appointments) {
-    if ((await options.client.findByIdempotencyKey(row.idempotencyKey)) !== undefined) {
-      reused.appointments += 1;
-      continue;
-    }
-    try {
-      await options.client.createAppointment({
-        idempotencyKey: row.idempotencyKey,
-        patientId: row.patientId,
-        plannedResourceId: row.plannedResourceId,
-        start: row.start,
-        status: row.status,
-      });
-      created.appointments += 1;
-    } catch (error) {
-      if (!(error instanceof OpenMrsAdminError) || (error.status !== 400 && error.status !== 404 && error.status !== 422)) {
-        throw error;
+  if (includesKind(kinds, 'observation')) {
+    for (const row of options.plan.observations) {
+      if ((await options.client.findByIdempotencyKey(row.idempotencyKey)) !== undefined) {
+        reused.observations += 1;
+        continue;
+      }
+      try {
+        await options.client.createObservation({
+          idempotencyKey: row.idempotencyKey,
+          patientId: row.patientId,
+          plannedResourceId: row.plannedResourceId,
+          interpretation: row.interpretation,
+          unlatched: row.unlatched,
+          loincCode: row.loincCode,
+          displayName: row.displayName,
+          unit: row.unit,
+          value: row.value,
+          effectiveDateTime: row.effectiveDateTime,
+        });
+        created.observations += 1;
+      } catch (error) {
+        if (!(error instanceof OpenMrsAdminError) || (error.status !== 400 && error.status !== 422)) {
+          throw error;
+        }
+        skipped.observations += 1;
       }
     }
   }
 
-  for (const row of options.plan.followUps) {
-    if ((await options.client.findByIdempotencyKey(row.idempotencyKey)) !== undefined) {
-      reused.followUps += 1;
-      continue;
+  if (includesKind(kinds, 'appointment')) {
+    for (const row of options.plan.appointments) {
+      if ((await options.client.findByIdempotencyKey(row.idempotencyKey)) !== undefined) {
+        reused.appointments += 1;
+        continue;
+      }
+      try {
+        await options.client.createAppointment({
+          idempotencyKey: row.idempotencyKey,
+          patientId: row.patientId,
+          plannedResourceId: row.plannedResourceId,
+          start: row.start,
+          status: row.status,
+        });
+        created.appointments += 1;
+      } catch (error) {
+        if (!(error instanceof OpenMrsAdminError) || (error.status !== 400 && error.status !== 404 && error.status !== 422)) {
+          throw error;
+        }
+      }
     }
-    await options.client.createFollowup(followupInput(row));
-    created.followUps += 1;
   }
 
-  for (const row of options.plan.edgeCases) {
-    if ((await options.client.findByIdempotencyKey(row.idempotencyKey)) !== undefined) {
-      reused.edgeCases += 1;
-      continue;
+  if (includesKind(kinds, 'followup')) {
+    for (const row of options.plan.followUps) {
+      if ((await options.client.findByIdempotencyKey(row.idempotencyKey)) !== undefined) {
+        reused.followUps += 1;
+        continue;
+      }
+      await options.client.createFollowup(followupInput(row));
+      created.followUps += 1;
     }
-    await options.client.createEdgeCase(edgeInput(row));
-    created.edgeCases += 1;
   }
 
-  return { created, reused, plan: options.plan };
+  if (includesKind(kinds, 'edge')) {
+    for (const row of options.plan.edgeCases) {
+      if ((await options.client.findByIdempotencyKey(row.idempotencyKey)) !== undefined) {
+        reused.edgeCases += 1;
+        continue;
+      }
+      await options.client.createEdgeCase(edgeInput(row));
+      created.edgeCases += 1;
+    }
+  }
+
+  return { created, reused, skipped, plan: options.plan };
 }
 
 function emptyCounts(): SeedCounts {
   return { appointments: 0, followUps: 0, observations: 0, edgeCases: 0 };
+}
+
+function includesKind(kinds: readonly SeededKind[] | undefined, kind: SeededKind): boolean {
+  return kinds === undefined || kinds.includes(kind);
 }
 
 function followupInput(row: PlannedFollowup): {
@@ -174,6 +206,7 @@ async function main(argv: string[]): Promise<void> {
   if (!isProfileId(profileId)) {
     throw new OpenMrsAdminError(0, 'usage');
   }
+  const appointmentsOnly = args.slice(1).includes('--appointments-only');
 
   let client: OpenMrsAdminClient;
   try {
@@ -206,7 +239,11 @@ async function main(argv: string[]): Promise<void> {
     runId: manifest.runId,
     patientIds,
   });
-  const result = await seedWorkload({ plan, client });
+  const result = await seedWorkload({
+    plan,
+    client,
+    ...(appointmentsOnly ? { kinds: APPOINTMENT_SEED_KINDS } : {}),
+  });
   process.stdout.write(
     `seed created=${result.created.appointments + result.created.followUps + result.created.observations + result.created.edgeCases} reused=${result.reused.appointments + result.reused.followUps + result.reused.observations + result.reused.edgeCases}\n`,
   );

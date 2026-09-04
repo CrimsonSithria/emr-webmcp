@@ -4,9 +4,13 @@ import {
   type DraftStore,
   type EmrAdapter,
   type FollowupDraft,
+  type FollowupQuery,
   type ToolName,
   type ToolRuntime,
 } from '@emr-webmcp/core';
+import { findUnlatched } from '@emr-webmcp/lablatch';
+
+const OPEN_FOLLOWUP_STATUSES = new Set(['not-started', 'in-progress']);
 
 export type SessionSnapshot = {
   authenticated: boolean;
@@ -51,7 +55,11 @@ export function createSessionCheckedRuntime(ports: {
     },
     find_unlatched_abnormal_results: async (input) => {
       requireLive('find_unlatched_abnormal_results');
-      return ports.getAdapter().listAbnormalResults(input as { limit: number; patientId?: string; cursor?: string });
+      const { items } = await findUnlatched(
+        ports.getAdapter(),
+        input as { limit?: number; patientId?: string },
+      );
+      return items;
     },
     get_result_context: async (input) => {
       requireLive('get_result_context');
@@ -67,7 +75,8 @@ export function createSessionCheckedRuntime(ports: {
     },
     list_open_followups: async (input) => {
       requireLive('list_open_followups');
-      return ports.getAdapter().listFollowups(input as { limit: number });
+      const followups = await ports.getAdapter().listFollowups(input as FollowupQuery);
+      return followups.filter((item) => OPEN_FOLLOWUP_STATUSES.has(item.status));
     },
     list_followup_assignees: async (input) => {
       requireLive('list_followup_assignees');

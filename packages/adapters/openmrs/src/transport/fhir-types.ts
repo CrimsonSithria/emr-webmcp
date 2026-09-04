@@ -137,16 +137,38 @@ export function readNextLink(data: unknown): string | undefined {
   return undefined;
 }
 
+const OPENMRS_WEBAPP_PREFIX = '/openmrs';
+
 export function toRequestPath(url: string): string {
-  if (url.startsWith('/')) {
+  const path = url.startsWith('/') ? url : parseAbsolutePath(url);
+  if (path === undefined) {
     return url;
   }
+  return stripOpenmrsWebapp(path);
+}
+
+function parseAbsolutePath(url: string): string | undefined {
   try {
     const parsed = new URL(url);
     return `${parsed.pathname}${parsed.search}`;
   } catch {
-    return url;
+    return undefined;
   }
+}
+
+/**
+ * `openmrsFetch` prepends `window.openmrsBase` (`/openmrs`). REST/FHIR next
+ * links are already rooted there, so following them raw becomes
+ * `/openmrs/openmrs/ws/...` and 404s the whole collect().
+ */
+function stripOpenmrsWebapp(path: string): string {
+  if (path === OPENMRS_WEBAPP_PREFIX) {
+    return '/';
+  }
+  if (path.startsWith(`${OPENMRS_WEBAPP_PREFIX}/`)) {
+    return path.slice(OPENMRS_WEBAPP_PREFIX.length);
+  }
+  return path;
 }
 
 export function referenceId(reference: string | undefined): string {

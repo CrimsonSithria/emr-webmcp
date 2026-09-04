@@ -45,6 +45,7 @@
   "dependencies": {
     "@carbon/react": "^1.83.0",
     "@emr-webmcp/core": "workspace:^",
+    "@emr-webmcp/lablatch": "workspace:^",
     "@emr-webmcp/openmrs-adapter": "workspace:^"
   },
   "peerDependencies": {

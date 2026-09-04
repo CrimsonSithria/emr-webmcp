@@ -244,6 +244,73 @@ describe('createSessionCheckedRuntime', () => {
     expect(denied.error?.code).toBe('unauthorized');
     expect(searchPatients).not.toHaveBeenCalled();
   });
+
+  it('runs LabLatch instead of returning raw abnormal results', async () => {
+    const result = {
+      id: 'obs-1',
+      patient: { id: 'patient-1', display: 'Ada Lovelace' },
+      name: 'Potassium',
+      observedAt: '2026-08-31T04:00:00.000Z',
+      interpretation: 'high' as const,
+      sourceReference: 'Observation/obs-1',
+    };
+    const listAbnormalResults = vi.fn(() => Promise.resolve([result]));
+    const listFollowups = vi.fn(() =>
+      Promise.resolve([
+        {
+          id: 'task-1',
+          patient: result.patient,
+          title: 'Repeat potassium',
+          status: 'in-progress' as const,
+          priority: 'high' as const,
+          sourceReference: result.sourceReference,
+        },
+      ]),
+    );
+    const { model } = startManager({
+      adapter: stubAdapter({ listAbnormalResults, listFollowups }),
+    });
+
+    const found = await invoke(model.tool('find_unlatched_abnormal_results'), { limit: 100 });
+    expect(found.ok).toBe(true);
+    expect(found.data).toEqual([]);
+    expect(listAbnormalResults).toHaveBeenCalled();
+    expect(listFollowups).toHaveBeenCalled();
+  });
+
+  it('returns only open follow-ups from list_open_followups', async () => {
+    const listFollowups = vi.fn(() =>
+      Promise.resolve([
+        {
+          id: 'open-1',
+          patient: { id: 'patient-1', display: 'Ada Lovelace' },
+          title: 'Open',
+          status: 'not-started' as const,
+          priority: 'high' as const,
+        },
+        {
+          id: 'done-1',
+          patient: { id: 'patient-1', display: 'Ada Lovelace' },
+          title: 'Done',
+          status: 'completed' as const,
+          priority: 'low' as const,
+        },
+      ]),
+    );
+    const { model } = startManager({
+      adapter: stubAdapter({ listFollowups }),
+    });
+
+    const listed = await invoke(model.tool('list_open_followups'), {
+      limit: 20,
+      patientId: 'patient-1',
+    });
+    expect(listed.ok).toBe(true);
+    expect(listed.data).toEqual([
+      expect.objectContaining({ id: 'open-1', status: 'not-started' }),
+    ]);
+    expect(listFollowups).toHaveBeenCalledWith({ limit: 20, patientId: 'patient-1' });
+  });
 });
 
 describe('EmrWebmcp page', () => {

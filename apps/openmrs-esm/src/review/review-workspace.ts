@@ -2,6 +2,7 @@ import { AdapterError, type DraftStore, type EmrAdapter, type FollowupDraft } fr
 import { useEffect, useState } from 'react';
 
 import { USE_PRIVILEGE } from '../openmrs/adapter-factory';
+import { recordConfirmedFollowup } from '../webmcp/agent-activity';
 import type { SessionSnapshot } from '../webmcp/use-webmcp-registration';
 import { releaseConfirmationController, type ConfirmationPorts } from './confirmation-controller';
 
@@ -85,6 +86,7 @@ function livePorts(): ConfirmationPorts | null {
     peek: (draftId) => requireStore().peek(draftId),
     consume: (draftId) => {
       const draft = requireStore().consume(draftId);
+      recordConfirmedFollowup({ patient: draft.patient.display, title: draft.title });
       releaseConfirmationController(draftId);
       notifyReviewWorkspace();
       return draft;
